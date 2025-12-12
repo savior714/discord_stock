@@ -81,6 +81,7 @@ bot_running = False
 bot_thread = None
 loop = None
 client = None
+gui_instance = None  # GUI 인스턴스 저장
 TICKER_HISTORY_FILE = 'ticker_history.json'
 TICKER_SAVE_FILE = 'current_tickers.json'  # 현재 감시 중인 티커 저장 파일
 ALERT_DATES_FILE = 'alert_dates.json'  # 알람 날짜 저장 파일
@@ -512,6 +513,13 @@ async def check_price():
         save_current_tickers()
         
         logging.info(f"📌 티커 목록 재정렬: 알람 전송된 {len(alerted_tickers)}개 티커를 상단으로 이동")
+        
+        # GUI 업데이트 (메인 스레드에서 실행)
+        if gui_instance:
+            try:
+                gui_instance.root.after(0, gui_instance.refresh_ticker_list)
+            except:
+                pass
     else:
         logging.info("=== 조건 만족 종목 없음 ===")
     
@@ -574,7 +582,10 @@ def run_bot():
 
 class StockBotGUI:
     def __init__(self, root):
-        global TICKERS, last_alert_dates
+        global TICKERS, last_alert_dates, gui_instance
+        
+        # GUI 인스턴스를 전역 변수에 저장
+        gui_instance = self
         
         self.root = root
         self.root.title("Discord 주가 알람 봇 - 다중 티커 감시")
@@ -696,8 +707,6 @@ class StockBotGUI:
         
         ttk.Button(ticker_button_frame, text="선택한 티커 삭제", 
                   command=self.delete_selected_ticker, width=20).pack(side=tk.LEFT, padx=5)
-        ttk.Button(ticker_button_frame, text="목록 새로고침", 
-                  command=self.refresh_ticker_list, width=20).pack(side=tk.LEFT, padx=5)
         
         # 초기 티커 목록 표시
         self.refresh_ticker_list()
