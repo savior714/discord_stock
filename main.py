@@ -259,7 +259,9 @@ def get_data_and_indicators(ticker):
         import logging as yf_logging
         yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
         
-        df = yf.download(ticker, period='6mo', interval='1d', progress=False, auto_adjust=True)
+        # Ticker 객체를 사용하여 독립적인 세션으로 데이터 다운로드
+        ticker_obj = yf.Ticker(ticker)
+        df = ticker_obj.history(period='6mo', interval='1d', auto_adjust=True)
         
         if df.empty or len(df) < 20:
             # 간단한 경고만 표시 (상세 에러는 생략)
