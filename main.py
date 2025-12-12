@@ -693,6 +693,18 @@ async def check_price():
     
     logging.info(f"=== 감시 완료: {len(tickers_to_check)}개 체크, {len(skipped_today)}개 건너뜀 (오늘 알람 전송됨) ===")
 
+@check_price.error
+async def check_price_error(error):
+    """check_price 태스크 오류 핸들러"""
+    logging.error(f"체크 프로세스 오류: {error}", exc_info=True)
+    # GUI가 있으면 에러 상태로 표시
+    if gui_instance:
+        try:
+            error_msg = str(error)[:30]
+            gui_instance.root.after(0, lambda: gui_instance.update_status('error', f'오류: {error_msg}...'))
+        except Exception as e:
+            logging.error(f"GUI 상태 업데이트 오류: {e}")
+
 # on_ready는 run_bot 함수 내부에서 정의됨
 
 def run_bot():
@@ -740,6 +752,9 @@ def run_bot():
         loop.run_until_complete(client.start(TOKEN))
     except Exception as e:
         logging.error(f"봇 실행 오류: {e}", exc_info=True)
+        # GUI가 있으면 에러 상태로 표시
+        if gui_instance:
+            gui_instance.update_status('error', f'오류 발생: {str(e)[:30]}...')
     finally:
         if loop and not loop.is_closed():
             try:
@@ -835,8 +850,19 @@ class StockBotGUI:
         status_frame = ttk.LabelFrame(self.root, text="상태", padding="10")
         status_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        self.status_label = ttk.Label(status_frame, text="🔴 대기 중...", font=('맑은 고딕', 10))
-        self.status_label.pack(anchor=tk.W)
+        # 상태 표시용 프레임 (동그라미 + 텍스트)
+        status_display_frame = ttk.Frame(status_frame)
+        status_display_frame.pack(anchor=tk.W)
+        
+        # 상태 표시 캔버스 (동그라미)
+        self.status_canvas = tk.Canvas(status_display_frame, width=20, height=20, highlightthickness=0)
+        self.status_canvas.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 초기 상태: 회색 (중지됨)
+        self.status_indicator = self.status_canvas.create_oval(4, 4, 16, 16, fill='gray', outline='darkgray')
+        
+        self.status_label = ttk.Label(status_display_frame, text="중지됨", font=('맑은 고딕', 10))
+        self.status_label.pack(side=tk.LEFT)
         
         # 감시 주기 표시
         check_minutes = CHECK_SECONDS // 60
@@ -950,6 +976,25 @@ class StockBotGUI:
             pass
         
         self.root.after(100, self.process_log_queue)
+    
+    def update_status(self, status_type, message):
+        """
+        상태 표시 업데이트
+        
+        Args:
+            status_type: 'running' (녹색), 'stopped' (회색), 'error' (빨간색)
+            message: 표시할 메시지
+        """
+        color_map = {
+            'running': ('green', 'darkgreen'),
+            'stopped': ('gray', 'darkgray'),
+            'error': ('red', 'darkred')
+        }
+        
+        if status_type in color_map:
+            fill_color, outline_color = color_map[status_type]
+            self.status_canvas.itemconfig(self.status_indicator, fill=fill_color, outline=outline_color)
+            self.status_label.config(text=message)
     
     def refresh_ticker_list(self, filter_text=''):
         """티커 목록 테이블 새로고침 (검색 필터 지원)"""
@@ -1193,7 +1238,9 @@ class StockBotGUI:
         # 티커 추가는 봇 실행 중에도 가능하도록 활성화 유지
         # self.ticker_entry.config(state=tk.DISABLED)
         # self.add_ticker_button.config(state=tk.DISABLED)
-        self.status_label.config(text="🟢 실행 중...")
+        
+        # 상태 표시: 녹색 (실행 중)
+        self.update_status('running', '실행 중...')
         
         # 티커 미리보기 생성
         ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
@@ -1227,7 +1274,9 @@ class StockBotGUI:
         # 티커 추가는 항상 활성화되어 있으므로 상태 변경 불필요
         # self.ticker_entry.config(state=tk.NORMAL)
         # self.add_ticker_button.config(state=tk.NORMAL)
-        self.status_label.config(text="🔴 중지됨")
+        
+        # 상태 표시: 회색 (중지됨)
+        self.update_status('stopped', '중지됨')
         
         self.add_log("")
         self.add_log("[중지] 봇을 중지합니다...")
@@ -1244,8 +1293,10 @@ class StockBotGUI:
 
 if __name__ == '__main__':
     try:
+        global gui_instance
         root = tk.Tk()
         app = StockBotGUI(root)
+        gui_instance = app  # 전역 변수에 GUI 인스턴스 저장
         root.mainloop()
     except tk.TclError as e:
         error_msg = str(e)
