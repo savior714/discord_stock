@@ -35,8 +35,8 @@ plt.switch_backend('Agg')
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-# 중복 알람 방지를 위한 상태 저장
-last_alert_state = False
+# 중복 알람 방지를 위한 상태 저장 (날짜 정보 포함)
+last_alert_date = None  # 마지막 알람을 보낸 날짜 (YYYY-MM-DD 형식)
 
 def is_active_time():
     """
@@ -243,7 +243,7 @@ async def check_price():
     """
     주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송
     """
-    global last_alert_state
+    global last_alert_date
     
     # 시간 체크: 지정된 시간이 아니면 함수 종료
     if not is_active_time():
@@ -264,6 +264,8 @@ async def check_price():
             return
 
         today = df.iloc[-1]
+        current_date = df.index[-1]  # 현재 데이터의 날짜 (일봉 기준)
+        current_date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)[:10]
         
         # 조건 확인
         cond_mfi = today['MFI'] < 35
@@ -279,6 +281,7 @@ async def check_price():
         status_icon = "✅" if all_conditions_met else "❌"
         logging.info(
             f"[{now_kst}] {status_icon} {TICKER} | "
+            f"Date: {current_date_str} | "
             f"Price: {today['Close']:.2f} | "
             f"RSI: {today['RSI']:.2f} {'✓' if cond_rsi else '✗'} | "
             f"MFI: {today['MFI']:.2f} {'✓' if cond_mfi else '✗'} | "
@@ -286,9 +289,10 @@ async def check_price():
             f"(Lower: {today['BB_Lower']:.2f})"
         )
         
-        # 모든 조건 만족 시 알람 전송 (중복 방지)
+        # 모든 조건 만족 시 알람 전송 (중복 방지: 같은 날짜에는 한 번만)
         if all_conditions_met:
-            if not last_alert_state:  # 이전에 알람을 보내지 않았을 때만
+            # 새로운 날짜이거나 이전에 알람을 보내지 않은 경우에만 알람 전송
+            if last_alert_date != current_date_str:
                 msg = (
                     f"🚨 **{TICKER} 매수 조건 포착!** ({now_kst})\n\n"
                     f"**조건 확인:**\n"
@@ -304,19 +308,20 @@ async def check_price():
                 if chart_buf:
                     file = discord.File(chart_buf, filename=f'{TICKER}_chart.png')
                     await channel.send(content=msg, file=file)
-                    logging.info(f">>> 알림 전송 완료: {TICKER}")
+                    logging.info(f">>> 알림 전송 완료: {TICKER} (날짜: {current_date_str})")
                 else:
                     await channel.send(content=msg)
                     logging.warning("차트 생성 실패, 텍스트만 전송")
                 
-                last_alert_state = True
+                last_alert_date = current_date_str
             else:
-                logging.debug("조건 만족했으나 이미 알람 전송됨 (중복 방지)")
+                logging.debug(f"조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨 (중복 방지)")
         else:
-            # 조건이 해제되면 상태 리셋
-            if last_alert_state:
+            # 조건이 해제되면 상태 리셋 (다음 날 알람 가능하도록)
+            if last_alert_date == current_date_str:
                 logging.info(f"조건 해제됨, 다음 알람 준비 완료")
-            last_alert_state = False
+                # 주의: last_alert_date는 유지하여 같은 날에는 다시 알람을 보내지 않음
+                # 하지만 다음 날짜의 데이터가 들어오면 자동으로 리셋됨
 
     except Exception as e:
         logging.error(f"체크 중 오류 발생: {e}", exc_info=True)

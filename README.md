@@ -44,18 +44,51 @@ DISCORD_CHANNEL_ID=123456789012345678
 TICKER=AAPL
 ```
 
-### 3. Discord 봇 토큰 발급
+### 3. Discord 봇 생성 및 설정
 
-1. [Discord Developer Portal](https://discord.com/developers/applications) 접속
-2. New Application 생성
-3. Bot 메뉴에서 봇 생성
-4. Token 복사하여 `.env` 파일에 입력
-5. OAuth2 > URL Generator에서 `bot`과 `Send Messages` 권한 선택
-6. 생성된 URL로 봇을 서버에 초대
+#### 3-1. Discord Developer Portal 접속 및 애플리케이션 생성
 
-### 4. 채널 ID 확인
+1. 웹 브라우저에서 [Discord Developer Portal](https://discord.com/developers/applications) 접속
+2. 우측 상단의 **"New Application"** 버튼 클릭
+3. 애플리케이션 이름 입력 (예: "주가 알람 봇") 후 **"Create"** 클릭
 
-Discord에서 개발자 모드 활성화 후, 알림을 받을 채널에서 우클릭 > ID 복사
+#### 3-2. 봇 생성 및 토큰 발급
+
+1. 왼쪽 메뉴에서 **"Bot"** 클릭
+2. **"Add Bot"** 또는 **"Reset Token"** 버튼 클릭하여 봇 생성
+3. **"TOKEN"** 섹션에서 **"Reset Token"** 또는 **"Copy"** 버튼 클릭
+4. 토큰이 표시되면 복사 (⚠️ **이 토큰은 한 번만 표시되므로 반드시 복사해두세요!**)
+5. 복사한 토큰을 `.env` 파일의 `DISCORD_TOKEN=` 뒤에 붙여넣기
+   ```
+   DISCORD_TOKEN=여기에_복사한_토큰_붙여넣기
+   ```
+
+#### 3-3. 봇 권한 설정 및 서버 초대
+
+1. 왼쪽 메뉴에서 **"OAuth2"** 클릭
+2. 그 다음 **"URL Generator"** 클릭
+3. **"SCOPES"** 섹션에서:
+   - ✅ **"bot"** 체크박스 선택
+4. **"BOT PERMISSIONS"** 섹션에서:
+   - ✅ **"Send Messages"** 체크박스 선택
+   - (선택사항) **"Attach Files"** 체크박스도 선택 (차트 이미지 전송용)
+5. 하단의 **"Generated URL"** 섹션에 URL이 자동 생성됨
+6. 생성된 URL을 복사하여 웹 브라우저 새 탭에서 열기
+7. 봇을 추가할 Discord 서버를 선택하고 **"승인"** 또는 **"Authorize"** 클릭
+8. 봇이 서버에 추가되었는지 확인 (서버 멤버 목록에 봇이 표시됨)
+
+#### 3-4. 채널 ID 확인
+
+1. Discord 앱 또는 웹에서 **설정** (톱니바퀴 아이콘) 클릭
+2. **"고급"** 또는 **"Advanced"** 메뉴로 이동
+3. **"개발자 모드"** 또는 **"Developer Mode"** 활성화
+4. 알림을 받을 채널에서 **우클릭** → **"ID 복사"** 또는 **"Copy ID"** 클릭
+5. 복사한 채널 ID를 `.env` 파일의 `DISCORD_CHANNEL_ID=` 뒤에 붙여넣기
+   ```
+   DISCORD_CHANNEL_ID=123456789012345678
+   ```
+
+> 💡 **팁**: 개발자 모드가 보이지 않으면, Discord 설정에서 "고급" 또는 "Advanced" 메뉴를 먼저 활성화해야 합니다.
 
 ## 실행 방법
 
