@@ -619,11 +619,46 @@ class StockBotGUI:
         self.status_label = ttk.Label(status_frame, text="대기 중...", font=('맑은 고딕', 10))
         self.status_label.pack(anchor=tk.W)
         
-        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "") if TICKERS else "없음"
-        self.ticker_label = ttk.Label(status_frame, 
-            text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)", 
-            font=('맑은 고딕', 9), foreground='gray')
-        self.ticker_label.pack(anchor=tk.W)
+        # 등록된 티커 목록 표시 (테이블)
+        ticker_list_frame = ttk.LabelFrame(self.root, text="등록된 티커 목록", padding="10")
+        ticker_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # 스크롤바가 있는 프레임
+        ticker_scroll_frame = ttk.Frame(ticker_list_frame)
+        ticker_scroll_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 스크롤바
+        ticker_scrollbar = ttk.Scrollbar(ticker_scroll_frame)
+        ticker_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Treeview (테이블)
+        columns = ('번호', '티커', '마지막 알람')
+        self.ticker_tree = ttk.Treeview(ticker_scroll_frame, columns=columns, show='headings', 
+                                        height=8, yscrollcommand=ticker_scrollbar.set)
+        
+        # 컬럼 설정
+        self.ticker_tree.heading('번호', text='번호')
+        self.ticker_tree.heading('티커', text='티커')
+        self.ticker_tree.heading('마지막 알람', text='마지막 알람 날짜')
+        
+        self.ticker_tree.column('번호', width=50, anchor='center')
+        self.ticker_tree.column('티커', width=100, anchor='center')
+        self.ticker_tree.column('마지막 알람', width=150, anchor='center')
+        
+        self.ticker_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        ticker_scrollbar.config(command=self.ticker_tree.yview)
+        
+        # 티커 목록 버튼 프레임
+        ticker_button_frame = ttk.Frame(ticker_list_frame)
+        ticker_button_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        ttk.Button(ticker_button_frame, text="선택한 티커 삭제", 
+                  command=self.delete_selected_ticker, width=20).pack(side=tk.LEFT, padx=5)
+        ttk.Button(ticker_button_frame, text="목록 새로고침", 
+                  command=self.refresh_ticker_list, width=20).pack(side=tk.LEFT, padx=5)
+        
+        # 초기 티커 목록 표시
+        self.refresh_ticker_list()
         
         # 로그 영역
         log_frame = ttk.LabelFrame(self.root, text="로그", padding="10")
@@ -670,6 +705,68 @@ class StockBotGUI:
             pass
         
         self.root.after(100, self.process_log_queue)
+    
+    def refresh_ticker_list(self):
+        """티커 목록 테이블 새로고침"""
+        # 기존 항목 삭제
+        for item in self.ticker_tree.get_children():
+            self.ticker_tree.delete(item)
+        
+        # 티커 목록 추가
+        for idx, ticker in enumerate(TICKERS, 1):
+            last_alert = last_alert_dates.get(ticker, '없음')
+            self.ticker_tree.insert('', tk.END, values=(idx, ticker, last_alert))
+    
+    def delete_selected_ticker(self):
+        """선택한 티커 삭제"""
+        global TICKERS, last_alert_dates
+        
+        selected_items = self.ticker_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("선택 필요", "삭제할 티커를 선택해주세요!")
+            return
+        
+        if bot_running:
+            messagebox.showwarning("경고", "봇 실행 중에는 티커를 삭제할 수 없습니다.\n먼저 봇을 중지해주세요.")
+            return
+        
+        # 선택된 티커 정보 가져오기
+        tickers_to_delete = []
+        for item in selected_items:
+            values = self.ticker_tree.item(item)['values']
+            ticker = values[1]  # 티커는 두 번째 컬럼
+            tickers_to_delete.append(ticker)
+        
+        # 확인 메시지
+        ticker_list = ', '.join(tickers_to_delete)
+        result = messagebox.askyesno("확인", 
+            f"다음 티커를 삭제하시겠습니까?\n\n{ticker_list}\n\n"
+            f"({len(tickers_to_delete)}개 선택됨)")
+        
+        if result:
+            # 티커 삭제
+            for ticker in tickers_to_delete:
+                if ticker in TICKERS:
+                    TICKERS.remove(ticker)
+                    logging.info(f"🗑️ 티커 삭제: {ticker}")
+                
+                # 알람 날짜 정보도 삭제
+                if ticker in last_alert_dates:
+                    del last_alert_dates[ticker]
+            
+            # 저장
+            save_current_tickers()
+            save_alert_dates()
+            
+            # UI 업데이트
+            self.refresh_ticker_list()
+            self.ticker_count_label.config(text=f"현재: {len(TICKERS)}/{MAX_TICKERS}개")
+            
+            self.add_log(f"[삭제] {len(tickers_to_delete)}개 티커 삭제 완료: {ticker_list}")
+            self.add_log(f"[현황] 남은 감시 종목: {len(TICKERS)}개")
+            
+            messagebox.showinfo("삭제 완료", 
+                f"{len(tickers_to_delete)}개 티커가 삭제되었습니다.\n남은 티커: {len(TICKERS)}개")
         
     def add_tickers_only(self):
         """티커만 추가 (봇 실행 중에도 가능)"""
@@ -698,9 +795,8 @@ class StockBotGUI:
         add_tickers(new_tickers)
         
         # UI 업데이트
-        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "") if TICKERS else "없음"
-        self.ticker_label.config(text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)")
         self.ticker_count_label.config(text=f"현재: {len(TICKERS)}/{MAX_TICKERS}개")
+        self.refresh_ticker_list()
         
         # 입력 필드 초기화
         self.ticker_entry.delete(0, tk.END)
@@ -738,9 +834,11 @@ class StockBotGUI:
         result = messagebox.askyesno("확인", f"현재 등록된 {len(TICKERS)}개의 티커를 모두 삭제하시겠습니까?")
         if result:
             TICKERS.clear()
+            last_alert_dates.clear()
             save_current_tickers()  # 빈 상태 저장
-            self.ticker_label.config(text=f"감시 종목: 없음 (0개)")
+            save_alert_dates()
             self.ticker_count_label.config(text=f"현재: 0/{MAX_TICKERS}개")
+            self.refresh_ticker_list()
             self.add_log(f"[삭제] 모든 티커가 삭제되었습니다.")
             messagebox.showinfo("삭제 완료", "모든 티커가 삭제되었습니다.")
     
@@ -775,9 +873,6 @@ class StockBotGUI:
         # self.add_ticker_button.config(state=tk.DISABLED)
         self.clear_button.config(state=tk.DISABLED)
         self.status_label.config(text="🟢 실행 중...")
-        
-        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
-        self.ticker_label.config(text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)")
         
         self.add_log("")
         self.add_log(f"[시작] 봇을 시작합니다...")
