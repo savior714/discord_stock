@@ -112,6 +112,29 @@ run_bot.bat
 python main.py
 ```
 
+### ⚠️ tkinter 오류 해결 방법
+
+만약 `TclError: Can't find a usable init.tcl` 오류가 발생한다면:
+
+1. **Python 재설치 (권장)**
+   - [python.org](https://www.python.org/downloads/)에서 Python 다운로드
+   - 설치 시 **"tcl/tk and IDLE"** 옵션 체크 (기본적으로 체크됨)
+   - 또는 전체 설치 프로그램 사용
+
+2. **Python 버전 변경**
+   - Python 3.13에서 tkinter 문제가 있을 수 있음
+   - Python 3.11 또는 3.12 사용 권장
+
+3. **Tcl/Tk 수동 설치**
+   ```bash
+   winget install ActiveState.ActiveTcl
+   ```
+   또는 [ActiveTcl](https://www.activestate.com/products/tcl/) 다운로드
+
+4. **가상 환경 사용**
+   - Python 3.11/3.12로 가상 환경 생성
+   - 가상 환경에서 패키지 설치 및 실행
+
 ### GUI 사용 방법
 
 1. 프로그램이 실행되면 **종목 티커 입력 필드**에 원하는 종목 코드를 입력하세요
