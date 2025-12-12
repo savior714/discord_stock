@@ -610,10 +610,19 @@ class StockBotGUI:
         self.add_log("Discord 주가 알람 봇이 시작되었습니다.")
         self.add_log("=" * 60)
         self.add_log("")
-        self.add_log("사용 방법:")
-        self.add_log("1. 종목 티커를 입력하세요 (예: AAPL, TSLA, 005930.KS)")
-        self.add_log("2. '봇 시작' 버튼을 클릭하세요")
-        self.add_log("3. 로그를 확인하여 봇 상태를 모니터링하세요")
+        
+        if TICKERS:
+            ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
+            self.add_log(f"💾 이전 세션 복원: {len(TICKERS)}개 티커")
+            self.add_log(f"   → {ticker_preview}")
+            self.add_log("")
+            self.add_log("'봇 시작' 버튼을 클릭하여 감시를 시작하세요.")
+        else:
+            self.add_log("사용 방법:")
+            self.add_log("1. 종목 티커를 입력하세요 (예: AAPL, TSLA, 005930.KS)")
+            self.add_log("2. '티커 추가' 버튼을 클릭하세요")
+            self.add_log("3. '봇 시작' 버튼을 클릭하여 감시를 시작하세요")
+        
         self.add_log("")
         
     def add_log(self, message):
