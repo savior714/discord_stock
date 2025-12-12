@@ -425,7 +425,10 @@ async def check_price():
             
             if all_conditions_met:
                 # 티커별로 마지막 알람 날짜 확인
-                if last_alert_dates.get(ticker) != current_date_str:
+                last_alert = last_alert_dates.get(ticker)
+                logging.info(f"🔍 {ticker} 알람 체크: 마지막 알람={last_alert}, 현재 날짜={current_date_str}")
+                
+                if last_alert != current_date_str:
                     # 알림 대기열에 추가
                     alerts_to_send.append({
                         'ticker': ticker,
@@ -435,8 +438,9 @@ async def check_price():
                         'now_kst': now_kst
                     })
                     last_alert_dates[ticker] = current_date_str
+                    logging.info(f"✅ {ticker}: 알람 대기열에 추가됨")
                 else:
-                    logging.debug(f"{ticker}: 조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨")
+                    logging.info(f"⏭️ {ticker}: 조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨 - 건너뜀")
 
         except Exception as e:
             logging.error(f"{ticker} 체크 중 오류 발생: {e}", exc_info=True)
@@ -563,8 +567,11 @@ class StockBotGUI:
         # 저장된 알람 날짜 불러오기
         saved_alert_dates = load_alert_dates()
         if saved_alert_dates:
-            last_alert_dates = saved_alert_dates
-            logging.info(f"📅 알람 날짜 정보 복원: {len(last_alert_dates)}개")
+            last_alert_dates.update(saved_alert_dates)
+            logging.info(f"📅 알람 날짜 정보 복원: {len(saved_alert_dates)}개")
+            # 복원된 알람 날짜 상세 로그
+            for ticker, date in saved_alert_dates.items():
+                logging.info(f"   - {ticker}: {date}")
         
         # 티커 히스토리 로드
         self.ticker_history = load_ticker_history()
@@ -582,7 +589,7 @@ class StockBotGUI:
         ttk.Label(top_frame, text="종목 티커 추가 (쉼표로 구분):", font=('맑은 고딕', 10)).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
         self.ticker_entry = ttk.Entry(top_frame, width=40, font=('맑은 고딕', 10))
         self.ticker_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.ticker_entry.insert(0, 'AAPL, TSLA, MSFT')
+        # 빈 상태로 시작
         
         # 티커 추가 버튼
         self.add_ticker_button = ttk.Button(top_frame, text="티커 추가", command=self.add_tickers_only, width=12)
