@@ -264,22 +264,51 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         import logging as yf_logging
         yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
         
+        # 특수 문자가 있는 티커 처리 (예: BRK.B)
+        # yfinance는 점(.)을 포함한 티커를 처리할 수 있지만, 
+        # 일부 경우 하이픈(-)으로 변환이 필요할 수 있음
+        ticker_symbol = ticker
+        
         # Ticker 객체를 사용하여 독립적인 세션으로 데이터 다운로드
-        ticker_obj = yf.Ticker(ticker)
+        ticker_obj = yf.Ticker(ticker_symbol)
+        
+        # 타임아웃 설정 추가 (기본 10초)
+        import requests
+        session = requests.Session()
+        session.timeout = 10
+        ticker_obj._session = session
+        
         df = ticker_obj.history(period='6mo', interval='1d', auto_adjust=True)
         
-        if df.empty or len(df) < 20:
-            # 간단한 경고만 표시 (상세 에러는 생략)
-            if retry_count == 0:
-                logging.debug(f"{ticker}: 데이터 부족 또는 없음")
+        if df.empty:
+            # 빈 데이터프레임 - 티커가 존재하지 않거나 상장폐지
+            if retry_count < max_retries:
+                logging.debug(f"🔄 {ticker}: 빈 데이터 - 재시도 {retry_count + 1}/{max_retries}")
+                import time
+                time.sleep(1)  # 1초 대기 후 재시도
+                return get_data_and_indicators(ticker, retry_count + 1, max_retries)
+            else:
+                logging.warning(f"❌ {ticker}: 빈 데이터 (티커 존재하지 않음 또는 상장폐지)")
+                return None
+        
+        if len(df) < 20:
+            # 데이터는 있지만 부족함
+            logging.warning(f"❌ {ticker}: 데이터 부족 ({len(df)}개 행, 최소 20개 필요)")
             return None
         
         # MultiIndex 컬럼을 단순 컬럼으로 변환 (yfinance 최신 버전 대응)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
+        # 필수 컬럼 확인
+        required_cols = ['Close', 'High', 'Low', 'Volume']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            logging.warning(f"❌ {ticker}: 필수 컬럼 누락 - {missing_cols} (사용 가능: {list(df.columns)})")
+            return None
+        
         df = df.sort_index()
-        df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
+        df = df.dropna(subset=required_cols)
         
         if len(df) < 20:
             if retry_count == 0:
@@ -310,22 +339,25 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
     except Exception as e:
         # 재시도 가능한 오류인지 확인
         error_msg = str(e).lower()
+        error_type = type(e).__name__
         is_retryable = 'timeout' in error_msg or 'timed out' in error_msg or 'connection' in error_msg
         
         # 재시도 가능하고 최대 재시도 횟수에 도달하지 않은 경우
         if is_retryable and retry_count < max_retries:
-            logging.debug(f"🔄 {ticker}: 재시도 {retry_count + 1}/{max_retries} (이유: {type(e).__name__})")
+            logging.debug(f"🔄 {ticker}: 재시도 {retry_count + 1}/{max_retries} (이유: {error_type})")
             import time
             time.sleep(0.5)  # 짧은 대기 후 재시도
             return get_data_and_indicators(ticker, retry_count + 1, max_retries)
         
-        # 최종 실패 시 로그
+        # 최종 실패 시 상세 로그
         if 'timeout' in error_msg or 'timed out' in error_msg:
-            logging.warning(f"❌ {ticker}: 타임아웃 (재시도 {retry_count}회 실패)")
+            logging.warning(f"❌ {ticker}: 타임아웃 (재시도 {retry_count}회 실패) - {str(e)[:100]}")
         elif 'not found' in error_msg or 'delisted' in error_msg:
-            logging.debug(f"❌ {ticker}: 티커를 찾을 수 없음 (상장폐지 가능)")
+            logging.warning(f"❌ {ticker}: 티커를 찾을 수 없음 (상장폐지 가능) - {str(e)[:100]}")
+        elif 'index' in error_msg or 'key' in error_msg:
+            logging.warning(f"❌ {ticker}: 데이터 구조 오류 - {error_type}: {str(e)[:100]}")
         else:
-            logging.warning(f"❌ {ticker}: 데이터 수신 오류 - {type(e).__name__} (재시도 {retry_count}회 실패)")
+            logging.warning(f"❌ {ticker}: {error_type} - {str(e)[:100]}")
         return None
 
 def check_bollinger_touch(df):
