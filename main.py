@@ -10,11 +10,29 @@ import pytz
 import os
 from dotenv import load_dotenv
 import logging
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
 import threading
 import asyncio
 import queue
+import json
+
+# tkinter import (필수)
+try:
+    import tkinter as tk
+    from tkinter import ttk, scrolledtext, messagebox
+except ImportError as e:
+    print(f"[ERROR] tkinter is not installed. Please install Python with tkinter support.")
+    print(f"Error details: {e}")
+    input("Press Enter to exit...")
+    exit(1)
+except Exception as e:
+    print(f"[ERROR] tkinter initialization failed: {e}")
+    print("\nThis is usually caused by missing Tcl/Tk libraries.")
+    print("Please try one of the following solutions:")
+    print("1. Reinstall Python and make sure to check 'tcl/tk and IDLE' option")
+    print("2. Or install Python from python.org (includes tkinter by default)")
+    print("3. Or use Python 3.11 or 3.12 instead of 3.13")
+    input("\nPress Enter to exit...")
+    exit(1)
 
 # 환경 변수 로드
 load_dotenv()
@@ -48,15 +66,41 @@ logging.basicConfig(
 )
 
 plt.switch_backend('Agg')
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
 
 # 전역 변수
-TICKER = ''
-last_alert_date = None
+TICKERS = []  # 감시할 티커 리스트
+last_alert_dates = {}  # 각 티커별 마지막 알람 날짜
 bot_running = False
 bot_thread = None
 loop = None
+client = None
+TICKER_HISTORY_FILE = 'ticker_history.json'
+MAX_HISTORY = 20
+
+def load_ticker_history():
+    """티커 히스토리 불러오기"""
+    if os.path.exists(TICKER_HISTORY_FILE):
+        try:
+            with open(TICKER_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_ticker_history(tickers):
+    """티커 히스토리 저장"""
+    try:
+        unique_tickers = []
+        for ticker in tickers:
+            if ticker not in unique_tickers:
+                unique_tickers.append(ticker)
+        unique_tickers = unique_tickers[:MAX_HISTORY]
+        with open(TICKER_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(unique_tickers, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logging.error(f"티커 히스토리 저장 오류: {e}")
+        return False
 
 def is_active_time():
     """
@@ -120,6 +164,10 @@ def get_data_and_indicators(ticker):
         if df.empty or len(df) < 20:
             logging.warning(f"데이터 부족: {len(df)}개 행만 수신됨")
             return None
+        
+        # MultiIndex 컬럼을 단순 컬럼으로 변환 (yfinance 최신 버전 대응)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
         
         df = df.sort_index()
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
@@ -235,9 +283,9 @@ def draw_chart(df, ticker):
 @tasks.loop(seconds=CHECK_SECONDS)
 async def check_price():
     """
-    주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송
+    주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송 (다중 티커 지원)
     """
-    global last_alert_date, TICKER
+    global last_alert_dates, TICKERS
     
     if not is_active_time():
         kst = pytz.timezone('Asia/Seoul')
@@ -250,112 +298,127 @@ async def check_price():
         logging.error(f"채널을 찾을 수 없습니다: {CHANNEL_ID}")
         return
 
-    try:
-        df = get_data_and_indicators(TICKER)
-        if df is None:
-            logging.warning("데이터를 가져올 수 없습니다.")
-            return
+    # 각 티커에 대해 체크
+    for ticker in TICKERS:
+        try:
+            df = get_data_and_indicators(ticker)
+            if df is None:
+                logging.warning(f"{ticker}: 데이터를 가져올 수 없습니다.")
+                continue
 
-        today = df.iloc[-1]
-        current_date = df.index[-1]
-        current_date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)[:10]
-        
-        cond_mfi = today['MFI'] < 35
-        cond_rsi = today['RSI'] < 35
-        cond_bb = check_bollinger_touch(df)
-        
-        all_conditions_met = cond_mfi and cond_rsi and cond_bb
-        
-        kst = pytz.timezone('Asia/Seoul')
-        now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
-        
-        status_icon = "✅" if all_conditions_met else "❌"
-        logging.info(
-            f"[{now_kst}] {status_icon} {TICKER} | "
-            f"Date: {current_date_str} | "
-            f"Price: {today['Close']:.2f} | "
-            f"RSI: {today['RSI']:.2f} {'✓' if cond_rsi else '✗'} | "
-            f"MFI: {today['MFI']:.2f} {'✓' if cond_mfi else '✗'} | "
-            f"BB: {'✓' if cond_bb else '✗'} "
-            f"(Lower: {today['BB_Lower']:.2f})"
-        )
-        
-        if all_conditions_met:
-            if last_alert_date != current_date_str:
-                msg = (
-                    f"🚨 **{TICKER} 매수 조건 포착!** ({now_kst})\n\n"
-                    f"**조건 확인:**\n"
-                    f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
-                    f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
-                    f"✅ 볼린저 밴드: 하단 터치\n"
-                    f"   - 현재가: `{today['Close']:.2f}`\n"
-                    f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
-                    f"📊 차트를 확인하세요!"
-                )
-                
-                chart_buf = draw_chart(df, TICKER)
-                if chart_buf:
-                    file = discord.File(chart_buf, filename=f'{TICKER}_chart.png')
-                    await channel.send(content=msg, file=file)
-                    logging.info(f">>> 알림 전송 완료: {TICKER} (날짜: {current_date_str})")
+            today = df.iloc[-1]
+            current_date = df.index[-1]
+            current_date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)[:10]
+            
+            cond_mfi = today['MFI'] < 35
+            cond_rsi = today['RSI'] < 35
+            cond_bb = check_bollinger_touch(df)
+            
+            all_conditions_met = cond_mfi and cond_rsi and cond_bb
+            
+            kst = pytz.timezone('Asia/Seoul')
+            now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+            
+            status_icon = "✅" if all_conditions_met else "❌"
+            logging.info(
+                f"[{now_kst}] {status_icon} {ticker} | "
+                f"Date: {current_date_str} | "
+                f"Price: {today['Close']:.2f} | "
+                f"RSI: {today['RSI']:.2f} {'✓' if cond_rsi else '✗'} | "
+                f"MFI: {today['MFI']:.2f} {'✓' if cond_mfi else '✗'} | "
+                f"BB: {'✓' if cond_bb else '✗'} "
+                f"(Lower: {today['BB_Lower']:.2f})"
+            )
+            
+            if all_conditions_met:
+                # 티커별로 마지막 알람 날짜 확인
+                if last_alert_dates.get(ticker) != current_date_str:
+                    msg = (
+                        f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
+                        f"**조건 확인:**\n"
+                        f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
+                        f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
+                        f"✅ 볼린저 밴드: 하단 터치\n"
+                        f"   - 현재가: `{today['Close']:.2f}`\n"
+                        f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
+                        f"📊 차트를 확인하세요!"
+                    )
+                    
+                    chart_buf = draw_chart(df, ticker)
+                    if chart_buf:
+                        file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
+                        await channel.send(content=msg, file=file)
+                        logging.info(f">>> 알림 전송 완료: {ticker} (날짜: {current_date_str})")
+                    else:
+                        await channel.send(content=msg)
+                        logging.warning(f"{ticker}: 차트 생성 실패, 텍스트만 전송")
+                    
+                    last_alert_dates[ticker] = current_date_str
                 else:
-                    await channel.send(content=msg)
-                    logging.warning("차트 생성 실패, 텍스트만 전송")
-                
-                last_alert_date = current_date_str
-            else:
-                logging.debug(f"조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨 (중복 방지)")
+                    logging.debug(f"{ticker}: 조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨")
 
-    except Exception as e:
-        logging.error(f"체크 중 오류 발생: {e}", exc_info=True)
+        except Exception as e:
+            logging.error(f"{ticker} 체크 중 오류 발생: {e}", exc_info=True)
 
-@client.event
-async def on_ready():
-    """
-    봇이 준비되었을 때 실행
-    """
-    logging.info(f'디스코드 봇 로그인 완료: {client.user}')
-    logging.info(f'감시 종목: {TICKER}')
-    logging.info(f'체크 주기: {CHECK_SECONDS}초 (10분)')
-    logging.info(f'감시 시간: 오전 10시 ~ 새벽 4시 (KST)')
-    
-    kst = pytz.timezone('Asia/Seoul')
-    now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
-    logging.info(f'현재 시간 (KST): {now_kst}')
-    
-    if is_active_time():
-        logging.info("✅ 감시 시간입니다. 체크를 시작합니다.")
-    else:
-        logging.info("⏸ 감시 시간이 아닙니다. 대기 중...")
-    
-    check_price.start()
+# on_ready는 run_bot 함수 내부에서 정의됨
 
 def run_bot():
     """
     Discord 봇을 실행하는 함수 (별도 스레드에서 실행)
     """
-    global loop, TICKER, bot_running
-    
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    global loop, TICKERS, bot_running, client
     
     try:
+        # 새로운 Discord client 생성
+        intents = discord.Intents.default()
+        client = discord.Client(intents=intents)
+        
+        # on_ready 이벤트 핸들러 등록
+        @client.event
+        async def on_ready():
+            logging.info(f'디스코드 봇 로그인 완료: {client.user}')
+            logging.info(f'감시 종목: {", ".join(TICKERS)} ({len(TICKERS)}개)')
+            logging.info(f'체크 주기: {CHECK_SECONDS}초 (10분)')
+            logging.info(f'감시 시간: 오전 10시 ~ 새벽 4시 (KST)')
+            
+            kst = pytz.timezone('Asia/Seoul')
+            now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+            logging.info(f'현재 시간 (KST): {now_kst}')
+            
+            if is_active_time():
+                logging.info("✅ 감시 시간입니다. 체크를 시작합니다.")
+            else:
+                logging.info("⏸ 감시 시간이 아닙니다. 대기 중...")
+            
+            check_price.start()
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         loop.run_until_complete(client.start(TOKEN))
     except Exception as e:
         logging.error(f"봇 실행 오류: {e}", exc_info=True)
     finally:
-        loop.close()
+        if loop and not loop.is_closed():
+            try:
+                if client:
+                    loop.run_until_complete(client.close())
+            except:
+                pass
+            loop.close()
 
 class StockBotGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Discord 주가 알람 봇")
-        self.root.geometry("800x700")
+        self.root.title("Discord 주가 알람 봇 - 다중 티커 감시")
+        self.root.geometry("900x750")
         self.root.resizable(True, True)
         
         # 스타일 설정
         style = ttk.Style()
         style.theme_use('clam')
+        
+        # 티커 히스토리 로드
+        self.ticker_history = load_ticker_history()
         
         self.setup_ui()
         self.process_log_queue()
@@ -505,13 +568,43 @@ class StockBotGUI:
         self.add_log("[중지] 봇을 중지합니다...")
         
         # 봇 종료
-        if loop and not loop.is_closed():
-            asyncio.run_coroutine_threadsafe(client.close(), loop)
+        try:
+            if loop and not loop.is_closed():
+                asyncio.run_coroutine_threadsafe(client.close(), loop)
+            check_price.cancel()
+        except Exception as e:
+            logging.error(f"봇 중지 오류: {e}")
         
-        check_price.cancel()
+        self.add_log("[안내] 봇을 다시 시작하려면 프로그램을 재시작하세요.")
 
 if __name__ == '__main__':
-    root = tk.Tk()
-    app = StockBotGUI(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = StockBotGUI(root)
+        root.mainloop()
+    except tk.TclError as e:
+        error_msg = str(e)
+        print("=" * 60)
+        print("[ERROR] tkinter GUI initialization failed!")
+        print("=" * 60)
+        print(f"\nError: {error_msg}")
+        print("\nThis error usually means Tcl/Tk libraries are missing.")
+        print("\nSolutions:")
+        print("1. Reinstall Python from python.org")
+        print("   - Make sure to check 'tcl/tk and IDLE' during installation")
+        print("   - Or use the full installer which includes tkinter by default")
+        print("\n2. If using Python 3.13, try Python 3.11 or 3.12 instead")
+        print("   (Python 3.13 sometimes has tkinter issues on Windows)")
+        print("\n3. Install Tcl/Tk manually:")
+        print("   - Download ActiveTcl from: https://www.activestate.com/products/tcl/")
+        print("   - Or use: winget install ActiveState.ActiveTcl")
+        print("\n4. Alternative: Use a virtual environment with Python 3.11/3.12")
+        print("=" * 60)
+        input("\nPress Enter to exit...")
+        exit(1)
+    except Exception as e:
+        logging.error(f"GUI error: {e}", exc_info=True)
+        print(f"\n[ERROR] Failed to start GUI: {e}")
+        input("Press Enter to exit...")
+        exit(1)
 

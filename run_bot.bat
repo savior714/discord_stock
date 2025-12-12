@@ -1,80 +1,139 @@
 @echo off
-chcp 65001 >nul
-title Discord 주가 알람 봇
+REM Try to set UTF-8 encoding, ignore if it fails
+chcp 65001 >nul 2>&1
+
+title Discord Stock Bot
 
 echo ========================================
-echo   Discord 주가 알람 봇 실행
+echo   Discord Stock Bot
 echo ========================================
 echo.
 
-REM 현재 디렉토리로 이동
+REM Change to script directory
 cd /d "%~dp0"
 
-REM 가상 환경 확인 및 활성화
-if exist "venv\Scripts\activate.bat" (
-    echo [1/3] 가상 환경 활성화 중...
-    call venv\Scripts\activate.bat
-    echo 가상 환경 활성화 완료
-) else if exist ".venv\Scripts\activate.bat" (
-    echo [1/3] 가상 환경 활성화 중...
-    call .venv\Scripts\activate.bat
-    echo 가상 환경 활성화 완료
-) else (
-    echo [1/3] 가상 환경을 찾을 수 없습니다. 시스템 Python을 사용합니다.
+REM Clear Python environment variables to avoid conflicts
+set PYTHONHOME=
+set PYTHONPATH=
+
+REM Fix Tcl/Tk library path for Python 3.13 (prevents tkinter init.tcl error)
+REM Find Python path and set TCL_LIBRARY and TK_LIBRARY
+for /f "tokens=*" %%i in ('py -c "import sys; import os; print(os.path.dirname(sys.executable))" 2^>nul') do set PYTHON_DIR=%%i
+if defined PYTHON_DIR (
+    if exist "%PYTHON_DIR%\tcl\tcl8.6" (
+        set TCL_LIBRARY=%PYTHON_DIR%\tcl\tcl8.6
+        set TK_LIBRARY=%PYTHON_DIR%\tcl\tk8.6
+    )
 )
 
 echo.
 
-REM .env 파일 확인
+REM Check .env file
 if not exist ".env" (
-    echo [경고] .env 파일이 없습니다!
-    echo env_example.txt를 참고하여 .env 파일을 생성해주세요.
+    echo [WARNING] .env file is missing!
+    echo Please create .env file by referring to env_example.txt
     echo.
-    pause
+    echo Press any key to exit...
+    pause >nul
     exit /b 1
 )
 
-echo [2/3] .env 파일 확인 완료
+echo [2/3] .env file found
 echo.
 
-REM 필요한 패키지 설치 확인
-echo [3/3] 필요한 패키지 확인 중...
-python -m pip install --upgrade pip >nul 2>&1
-python -m pip install -r requirements.txt --quiet
+REM Check and install required packages
+echo [3/3] Checking required packages...
+
+REM Check Python installation
+py --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Python not found. Please install Python from python.org
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+
+REM Get Python executable path
+for /f "tokens=*" %%i in ('py -c "import sys; print(sys.executable)" 2^>nul') do set PYTHON_EXE=%%i
+if not defined PYTHON_EXE (
+    echo [ERROR] Python installation may be corrupted.
+    echo Please reinstall Python from python.org
+    echo.
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+
+REM Check for virtual environment, create if not exists
+if not exist "venv" (
+    echo Creating virtual environment...
+    py -m venv venv
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment.
+        echo Please reinstall Python from python.org
+        echo Make sure to check "Add Python to PATH" and "tcl/tk and IDLE" during installation.
+        echo.
+        echo Press any key to exit...
+        pause >nul
+        exit /b 1
+    )
+    echo Virtual environment created.
+)
+
+REM Activate virtual environment
+echo Activating virtual environment...
+call venv\Scripts\activate.bat
+if errorlevel 1 (
+    echo [ERROR] Failed to activate virtual environment.
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+echo Virtual environment activated.
+echo.
+
+REM Install packages in virtual environment
+echo Installing required packages (this may take a few minutes)...
+echo.
+pip install -r requirements.txt --no-warn-script-location
 if errorlevel 1 (
     echo.
-    echo [오류] 패키지 설치 중 문제가 발생했습니다.
-    echo requirements.txt 파일을 확인해주세요.
+    echo [ERROR] Failed to install packages.
+    echo Please check requirements.txt file.
     echo.
-    pause
+    echo Press any key to exit...
+    pause >nul
     exit /b 1
 )
-echo 패키지 확인 완료
+echo Packages checked
 echo.
 
-REM 봇 실행
+REM Start bot
 echo ========================================
-echo   봇 시작 중...
+echo   Starting bot...
 echo ========================================
 echo.
 
 python main.py
 
-REM 에러 발생 시
+REM Handle errors
 if errorlevel 1 (
     echo.
     echo ========================================
-    echo   봇 실행 중 오류가 발생했습니다.
+    echo   Error occurred while running bot
     echo ========================================
     echo.
-    echo 오류 내용을 확인하고 다음을 점검해주세요:
-    echo 1. .env 파일의 토큰과 채널 ID가 올바른지 확인
-    echo 2. 인터넷 연결 상태 확인
-    echo 3. bot.log 파일에서 상세 오류 확인
+    echo Please check the following:
+    echo 1. Verify DISCORD_TOKEN and DISCORD_CHANNEL_ID in .env file
+    echo 2. Check internet connection
+    echo 3. Check bot.log file for detailed error messages
     echo.
-    pause
+    echo Press any key to exit...
+    pause >nul
     exit /b 1
 )
 
-pause
+echo.
+echo Press any key to exit...
+pause >nul
 
