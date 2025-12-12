@@ -229,6 +229,7 @@ def calculate_rsi_wilders(prices, period=14):
 def calculate_mfi(df, period=14):
     """
     Money Flow Index (MFI) 계산
+    0으로 나누기 방지 및 극단적인 경우 처리
     """
     tp = (df['High'] + df['Low'] + df['Close']) / 3
     raw_money_flow = tp * df['Volume']
@@ -239,9 +240,16 @@ def calculate_mfi(df, period=14):
     pos_mf = pos_flow.rolling(period).sum()
     neg_mf = neg_flow.rolling(period).sum()
     
+    # 0으로 나누기 방지: neg_mf가 0이면 매우 작은 값으로 대체
+    # 이 경우 MFI는 거의 100에 가까워짐 (강한 상승 신호)
+    neg_mf = neg_mf.replace(0, 1e-10)
+    
     mfi_ratio = pos_mf / neg_mf
     mfi_ratio = mfi_ratio.replace([np.inf, -np.inf], np.nan)
     mfi = 100 - (100 / (1 + mfi_ratio))
+    
+    # MFI는 0~100 범위여야 함
+    mfi = mfi.clip(0, 100)
     
     return mfi
 
