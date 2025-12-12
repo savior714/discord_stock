@@ -164,6 +164,8 @@ def add_tickers(new_tickers):
     global TICKERS
     
     added_count = 0
+    skipped_count = 0
+    
     for ticker in new_tickers:
         ticker = ticker.strip().upper()
         if ticker and ticker not in TICKERS:
@@ -171,7 +173,8 @@ def add_tickers(new_tickers):
             logging.info(f"✅ 티커 추가: {ticker}")
             added_count += 1
         elif ticker in TICKERS:
-            logging.info(f"⚠️ 이미 등록된 티커: {ticker}")
+            logging.info(f"⚠️ 이미 등록된 티커 (건너뜀): {ticker}")
+            skipped_count += 1
     
     # 히스토리에 저장
     history = load_ticker_history()
@@ -183,7 +186,7 @@ def add_tickers(new_tickers):
     # 현재 티커 목록 저장
     save_current_tickers()
     
-    logging.info(f"📊 총 {added_count}개 티커 추가됨. 현재 감시 중인 티커: {len(TICKERS)}개")
+    logging.info(f"📊 총 {added_count}개 티커 추가됨, {skipped_count}개 중복 건너뜀. 현재 감시 중인 티커: {len(TICKERS)}개")
     logging.info(f"📋 전체 티커 목록: {', '.join(TICKERS)}")
 
 def is_active_time():
@@ -561,8 +564,23 @@ class StockBotGUI:
         # 저장된 티커 불러오기
         saved_tickers = load_current_tickers()
         if saved_tickers:
-            TICKERS = saved_tickers
+            # 중복 제거 (순서 유지)
+            seen = set()
+            unique_tickers = []
+            duplicates = []
+            for ticker in saved_tickers:
+                if ticker not in seen:
+                    seen.add(ticker)
+                    unique_tickers.append(ticker)
+                else:
+                    duplicates.append(ticker)
+            
+            TICKERS = unique_tickers
             logging.info(f"💾 이전 세션의 티커 복원: {len(TICKERS)}개")
+            
+            if duplicates:
+                logging.info(f"🔧 중복 티커 제거됨: {', '.join(duplicates)}")
+                save_current_tickers()  # 중복 제거된 목록 저장
         
         # 저장된 알람 날짜 불러오기
         saved_alert_dates = load_alert_dates()
