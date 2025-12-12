@@ -973,7 +973,6 @@ class StockBotGUI:
         # 티커 추가는 봇 실행 중에도 가능하도록 활성화 유지
         # self.ticker_entry.config(state=tk.DISABLED)
         # self.add_ticker_button.config(state=tk.DISABLED)
-        self.clear_button.config(state=tk.DISABLED)
         self.status_label.config(text="🟢 실행 중...")
         
         # 티커 미리보기 생성
@@ -1007,7 +1006,6 @@ class StockBotGUI:
         # 티커 추가는 항상 활성화되어 있으므로 상태 변경 불필요
         # self.ticker_entry.config(state=tk.NORMAL)
         # self.add_ticker_button.config(state=tk.NORMAL)
-        self.clear_button.config(state=tk.NORMAL)
         self.status_label.config(text="🔴 중지됨")
         
         self.add_log("")
