@@ -84,12 +84,6 @@ client = None
 TICKER_HISTORY_FILE = 'ticker_history.json'
 MAX_HISTORY = 20
 
-# 초기 티커 로드 (.env 파일에서)
-initial_ticker = os.getenv('TICKER', '').strip().upper()
-if initial_ticker:
-    TICKERS = [initial_ticker]
-    logging.info(f"초기 티커 로드: {initial_ticker}")
-
 def load_ticker_history():
     """티커 히스토리 불러오기"""
     if os.path.exists(TICKER_HISTORY_FILE):
@@ -196,6 +190,10 @@ def get_data_and_indicators(ticker):
     일봉 데이터와 보조지표 계산
     """
     try:
+        # FutureWarning 억제
+        import warnings
+        warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
+        
         df = yf.download(ticker, period='6mo', interval='1d', progress=False, auto_adjust=True)
         
         if df.empty or len(df) < 20:
