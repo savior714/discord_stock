@@ -1297,7 +1297,6 @@ class StockBotGUI:
 
 if __name__ == '__main__':
     try:
-        global gui_instance
         root = tk.Tk()
         app = StockBotGUI(root)
         gui_instance = app  # 전역 변수에 GUI 인스턴스 저장
