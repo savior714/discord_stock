@@ -509,28 +509,31 @@ class StockBotGUI:
         top_frame.pack(fill=tk.X)
         
         # 티커 입력
-        ttk.Label(top_frame, text="종목 티커 (쉼표로 구분):", font=('맑은 고딕', 10)).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
-        self.ticker_entry = ttk.Entry(top_frame, width=50, font=('맑은 고딕', 10))
+        ttk.Label(top_frame, text="종목 티커 추가 (쉼표로 구분):", font=('맑은 고딕', 10)).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        self.ticker_entry = ttk.Entry(top_frame, width=40, font=('맑은 고딕', 10))
         self.ticker_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.ticker_entry.insert(0, 'AAPL, TSLA, MSFT')
         
-        # 기존 티커가 있으면 표시, 없으면 예시
-        if TICKERS:
-            self.ticker_entry.insert(0, ', '.join(TICKERS[:5]))
-        else:
-            self.ticker_entry.insert(0, 'AAPL, TSLA, MSFT')
+        # 티커 추가 버튼
+        self.add_ticker_button = ttk.Button(top_frame, text="티커 추가", command=self.add_tickers_only, width=12)
+        self.add_ticker_button.grid(row=0, column=2, padx=5, pady=5)
         
-        ttk.Label(top_frame, text=f"(최대 {MAX_TICKERS}개 | 현재: {len(TICKERS)}개)", 
-                 font=('맑은 고딕', 9), foreground='gray').grid(row=0, column=2, padx=5, sticky=tk.W)
+        self.ticker_count_label = ttk.Label(top_frame, text=f"현재: {len(TICKERS)}/{MAX_TICKERS}개", 
+                 font=('맑은 고딕', 9), foreground='gray')
+        self.ticker_count_label.grid(row=0, column=3, padx=5, sticky=tk.W)
         
         # 버튼 프레임
         button_frame = ttk.Frame(top_frame)
-        button_frame.grid(row=1, column=0, columnspan=3, pady=10)
+        button_frame.grid(row=1, column=0, columnspan=4, pady=10)
         
         self.start_button = ttk.Button(button_frame, text="봇 시작", command=self.start_bot, width=15)
         self.start_button.pack(side=tk.LEFT, padx=5)
         
         self.stop_button = ttk.Button(button_frame, text="봇 중지", command=self.stop_bot, width=15, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
+        
+        self.clear_button = ttk.Button(button_frame, text="티커 전체 삭제", command=self.clear_all_tickers, width=15)
+        self.clear_button.pack(side=tk.LEFT, padx=5)
         
         # 상태 표시
         status_frame = ttk.LabelFrame(self.root, text="상태", padding="10")
@@ -595,14 +598,14 @@ class StockBotGUI:
         
         self.root.after(100, self.process_log_queue)
         
-    def start_bot(self):
-        """봇 시작"""
-        global TICKERS, bot_running, bot_thread, last_alert_dates
+    def add_tickers_only(self):
+        """티커만 추가 (봇 시작 없이)"""
+        global TICKERS
         
         # 티커 확인
         ticker_input = self.ticker_entry.get().strip().upper()
         if not ticker_input:
-            messagebox.showerror("오류", "종목 티커를 입력해주세요!")
+            messagebox.showwarning("입력 필요", "추가할 종목 티커를 입력해주세요!")
             return
         
         # 쉼표로 구분된 티커들을 파싱
@@ -618,6 +621,51 @@ class StockBotGUI:
                 f"최대 {MAX_TICKERS}개까지만 감시할 수 있습니다.\n현재 등록된 티커: {len(TICKERS)}개")
             return
         
+        # 티커 추가
+        add_tickers(new_tickers)
+        
+        # UI 업데이트
+        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "") if TICKERS else "없음"
+        self.ticker_label.config(text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)")
+        self.ticker_count_label.config(text=f"현재: {len(TICKERS)}/{MAX_TICKERS}개")
+        
+        # 입력 필드 초기화
+        self.ticker_entry.delete(0, tk.END)
+        
+        self.add_log(f"[추가] 티커 추가 완료: {', '.join(new_tickers)}")
+        self.add_log(f"[현황] 전체 감시 종목: {len(TICKERS)}개")
+        
+        messagebox.showinfo("추가 완료", f"{len(new_tickers)}개 티커가 추가되었습니다.\n현재 총 {len(TICKERS)}개 감시 중")
+    
+    def clear_all_tickers(self):
+        """전체 티커 삭제"""
+        global TICKERS
+        
+        if not TICKERS:
+            messagebox.showinfo("알림", "삭제할 티커가 없습니다.")
+            return
+        
+        if bot_running:
+            messagebox.showwarning("경고", "봇 실행 중에는 티커를 삭제할 수 없습니다.\n먼저 봇을 중지해주세요.")
+            return
+        
+        result = messagebox.askyesno("확인", f"현재 등록된 {len(TICKERS)}개의 티커를 모두 삭제하시겠습니까?")
+        if result:
+            TICKERS.clear()
+            self.ticker_label.config(text=f"감시 종목: 없음 (0개)")
+            self.ticker_count_label.config(text=f"현재: 0/{MAX_TICKERS}개")
+            self.add_log(f"[삭제] 모든 티커가 삭제되었습니다.")
+            messagebox.showinfo("삭제 완료", "모든 티커가 삭제되었습니다.")
+    
+    def start_bot(self):
+        """봇 시작"""
+        global TICKERS, bot_running, bot_thread, last_alert_dates
+        
+        # 티커 확인
+        if not TICKERS:
+            messagebox.showerror("오류", "감시할 티커가 없습니다!\n먼저 '티커 추가' 버튼으로 티커를 추가해주세요.")
+            return
+        
         # 설정 확인
         if not TOKEN or TOKEN == '여기에_디스코드_봇_토큰':
             messagebox.showerror("오류", ".env 파일에 DISCORD_TOKEN을 설정해주세요!")
@@ -631,14 +679,13 @@ class StockBotGUI:
             messagebox.showwarning("경고", "봇이 이미 실행 중입니다!")
             return
         
-        # 티커 추가
-        add_tickers(new_tickers)
-        
         bot_running = True
         
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
         self.ticker_entry.config(state=tk.DISABLED)
+        self.add_ticker_button.config(state=tk.DISABLED)
+        self.clear_button.config(state=tk.DISABLED)
         self.status_label.config(text="🟢 실행 중...")
         
         ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
@@ -646,7 +693,6 @@ class StockBotGUI:
         
         self.add_log("")
         self.add_log(f"[시작] 봇을 시작합니다...")
-        self.add_log(f"[등록] 새로 추가된 티커: {', '.join(new_tickers)}")
         self.add_log(f"[설정] 전체 감시 종목: {ticker_preview} (총 {len(TICKERS)}개)")
         if len(TICKERS) > 10:
             self.add_log(f"[상세] 전체 티커 목록: {', '.join(TICKERS)}")
@@ -671,6 +717,8 @@ class StockBotGUI:
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.ticker_entry.config(state=tk.NORMAL)
+        self.add_ticker_button.config(state=tk.NORMAL)
+        self.clear_button.config(state=tk.NORMAL)
         self.status_label.config(text="🔴 중지됨")
         
         self.add_log("")
