@@ -42,7 +42,7 @@ load_dotenv()
 # ================= 설정값 =================
 TOKEN = os.getenv('DISCORD_TOKEN', '')
 CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID', '')
-CHECK_SECONDS = 1800  # 30분 (1800초)
+CHECK_SECONDS = 600  # 10분 (600초)
 DISCORD_MESSAGE_INTERVAL = 10  # Discord 메시지 전송 간격 (초)
 MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
@@ -700,7 +700,8 @@ def run_bot():
             logging.info(f'디스코드 봇 로그인 완료: {client.user}')
             ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
             logging.info(f'감시 종목: {ticker_preview} ({len(TICKERS)}개)')
-            logging.info(f'체크 주기: {CHECK_SECONDS}초 (30분)')
+            check_minutes = CHECK_SECONDS // 60
+            logging.info(f'체크 주기: {CHECK_SECONDS}초 ({check_minutes}분)')
             logging.info(f'Discord 메시지 간격: {DISCORD_MESSAGE_INTERVAL}초')
             logging.info(f'최대 감시 가능: {MAX_TICKERS}개')
             logging.info(f'감시 시간: 오전 10시 ~ 새벽 4시 (KST)')
@@ -820,9 +821,19 @@ class StockBotGUI:
         # 상태 표시
         status_frame = ttk.LabelFrame(self.root, text="상태", padding="10")
         status_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        self.status_label = ttk.Label(status_frame, text="대기 중...", font=('맑은 고딕', 10))
+
+        self.status_label = ttk.Label(status_frame, text="🔴 대기 중...", font=('맑은 고딕', 10))
         self.status_label.pack(anchor=tk.W)
+        
+        # 감시 주기 표시
+        check_minutes = CHECK_SECONDS // 60
+        self.check_interval_label = ttk.Label(
+            status_frame, 
+            text=f"⏱️ 감시 주기: {check_minutes}분마다 체크", 
+            font=('맑은 고딕', 9),
+            foreground='gray'
+        )
+        self.check_interval_label.pack(anchor=tk.W, pady=(5, 0))
         
         # 등록된 티커 목록 표시 (테이블)
         ticker_list_frame = ttk.LabelFrame(self.root, text="등록된 티커 목록", padding="10")
@@ -1130,7 +1141,8 @@ class StockBotGUI:
         self.add_log(f"[설정] 전체 감시 종목: {ticker_preview} (총 {len(TICKERS)}개)")
         if len(TICKERS) > 10:
             self.add_log(f"[상세] 전체 티커 목록: {', '.join(TICKERS)}")
-        self.add_log(f"[설정] 체크 주기: {CHECK_SECONDS}초 (30분)")
+        check_minutes = CHECK_SECONDS // 60
+        self.add_log(f"[설정] 체크 주기: {CHECK_SECONDS}초 ({check_minutes}분)")
         self.add_log(f"[설정] Discord 메시지 간격: {DISCORD_MESSAGE_INTERVAL}초")
         self.add_log(f"[설정] 감시 시간: 오전 10시 ~ 새벽 4시 (KST)")
         self.add_log("")
