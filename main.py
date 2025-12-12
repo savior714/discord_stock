@@ -289,8 +289,21 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         
         # 타임아웃 설정 추가 (기본 10초)
         import requests
+        from requests.adapters import HTTPAdapter
+        
+        class TimeoutHTTPAdapter(HTTPAdapter):
+            def __init__(self, timeout, *args, **kwargs):
+                self.timeout = timeout
+                super().__init__(*args, **kwargs)
+            
+            def send(self, request, **kwargs):
+                kwargs['timeout'] = kwargs.get('timeout') or self.timeout
+                return super().send(request, **kwargs)
+        
         session = requests.Session()
-        session.timeout = 10
+        adapter = TimeoutHTTPAdapter(timeout=10)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
         ticker_obj._session = session
         
         df = ticker_obj.history(period='6mo', interval='1d', auto_adjust=True)
