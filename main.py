@@ -245,9 +245,14 @@ def calculate_mfi(df, period=14):
     
     return mfi
 
-def get_data_and_indicators(ticker):
+def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
     """
-    일봉 데이터와 보조지표 계산 (동기 버전 - 병렬 처리용)
+    일봉 데이터와 보조지표 계산 (동기 버전 - 병렬 처리용, 재시도 지원)
+    
+    Args:
+        ticker: 티커 심볼
+        retry_count: 현재 재시도 횟수
+        max_retries: 최대 재시도 횟수
     """
     try:
         # FutureWarning 및 yfinance 경고 억제
@@ -265,7 +270,8 @@ def get_data_and_indicators(ticker):
         
         if df.empty or len(df) < 20:
             # 간단한 경고만 표시 (상세 에러는 생략)
-            logging.debug(f"{ticker}: 데이터 부족 또는 없음")
+            if retry_count == 0:
+                logging.debug(f"{ticker}: 데이터 부족 또는 없음")
             return None
         
         # MultiIndex 컬럼을 단순 컬럼으로 변환 (yfinance 최신 버전 대응)
@@ -276,7 +282,8 @@ def get_data_and_indicators(ticker):
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         
         if len(df) < 20:
-            logging.debug(f"{ticker}: NaN 제거 후 데이터 부족")
+            if retry_count == 0:
+                logging.debug(f"{ticker}: NaN 제거 후 데이터 부족")
             return None
         
         df['RSI'] = calculate_rsi_wilders(df['Close'], period=14)
@@ -290,20 +297,35 @@ def get_data_and_indicators(ticker):
         
         latest = df.iloc[-1]
         if pd.isna(latest['RSI']) or pd.isna(latest['MFI']) or pd.isna(latest['BB_Lower']):
-            logging.debug(f"{ticker}: 최신 데이터에 NaN 값 존재")
+            if retry_count == 0:
+                logging.debug(f"{ticker}: 최신 데이터에 NaN 값 존재")
             return None
+        
+        # 재시도 후 성공한 경우 로그
+        if retry_count > 0:
+            logging.info(f"✅ {ticker}: 재시도 {retry_count}회 후 성공")
         
         return df
         
     except Exception as e:
-        # 타임아웃이나 네트워크 오류는 간단히 로그
+        # 재시도 가능한 오류인지 확인
         error_msg = str(e).lower()
+        is_retryable = 'timeout' in error_msg or 'timed out' in error_msg or 'connection' in error_msg
+        
+        # 재시도 가능하고 최대 재시도 횟수에 도달하지 않은 경우
+        if is_retryable and retry_count < max_retries:
+            logging.debug(f"🔄 {ticker}: 재시도 {retry_count + 1}/{max_retries} (이유: {type(e).__name__})")
+            import time
+            time.sleep(0.5)  # 짧은 대기 후 재시도
+            return get_data_and_indicators(ticker, retry_count + 1, max_retries)
+        
+        # 최종 실패 시 로그
         if 'timeout' in error_msg or 'timed out' in error_msg:
-            logging.warning(f"{ticker}: 타임아웃 (네트워크 지연)")
+            logging.warning(f"❌ {ticker}: 타임아웃 (재시도 {retry_count}회 실패)")
         elif 'not found' in error_msg or 'delisted' in error_msg:
-            logging.debug(f"{ticker}: 티커를 찾을 수 없음")
+            logging.debug(f"❌ {ticker}: 티커를 찾을 수 없음 (상장폐지 가능)")
         else:
-            logging.warning(f"{ticker}: 데이터 수신 오류 - {type(e).__name__}")
+            logging.warning(f"❌ {ticker}: 데이터 수신 오류 - {type(e).__name__} (재시도 {retry_count}회 실패)")
         return None
 
 def check_bollinger_touch(df):
@@ -509,7 +531,18 @@ async def check_price():
     
     # 다운로드 완료 시간 기록
     download_time = time_module.time() - start_time
-    logging.info(f"✅ 데이터 다운로드 완료: {len(ticker_results)}개 성공, {len(tickers_to_check) - len(ticker_results)}개 실패 (소요 시간: {download_time:.1f}초)")
+    success_count = len(ticker_results)
+    fail_count = len(tickers_to_check) - success_count
+    
+    # 실패한 티커 목록 생성
+    failed_tickers = [t for t in tickers_to_check if not any(r['ticker'] == t for r in ticker_results)]
+    
+    logging.info(f"✅ 데이터 다운로드 완료: {success_count}개 성공, {fail_count}개 실패 (소요 시간: {download_time:.1f}초)")
+    
+    # 실패한 티커가 있으면 명확하게 표시
+    if failed_tickers:
+        failed_preview = ', '.join(failed_tickers[:10]) + ('...' if len(failed_tickers) > 10 else '')
+        logging.warning(f"⚠️ 실패한 티커 ({fail_count}개): {failed_preview}")
     
     # 조건을 만족하는 티커만 필터링
     alerted_tickers_list = [r for r in ticker_results if r['alert']]
