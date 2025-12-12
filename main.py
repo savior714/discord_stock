@@ -391,10 +391,10 @@ async def check_price():
 
     logging.info(f"=== 감시 시작: {len(TICKERS)}개 티커 체크 ===")
     
-    # 알림을 보낼 티커들을 모아서 처리 (Discord 메시지 간격 제한)
-    alerts_to_send = []
+    # 알림 전송 카운터
+    alert_count = 0
     
-    # 각 티커에 대해 체크
+    # 각 티커에 대해 체크하고 즉시 알림 전송
     for idx, ticker in enumerate(TICKERS, 1):
         try:
             df = get_data_and_indicators(ticker)
@@ -432,16 +432,39 @@ async def check_price():
                 logging.info(f"🔍 {ticker} 알람 체크: 마지막 알람={last_alert}, 현재 날짜={current_date_str}")
                 
                 if last_alert != current_date_str:
-                    # 알림 대기열에 추가
-                    alerts_to_send.append({
-                        'ticker': ticker,
-                        'date': current_date_str,
-                        'data': today,
-                        'df': df,
-                        'now_kst': now_kst
-                    })
-                    last_alert_dates[ticker] = current_date_str
-                    logging.info(f"✅ {ticker}: 알람 대기열에 추가됨")
+                    # 즉시 알림 전송
+                    try:
+                        alert_count += 1
+                        logging.info(f"📤 {ticker}: 알림 전송 시작 ({alert_count}번째)")
+                        
+                        msg = (
+                            f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
+                            f"**조건 확인:**\n"
+                            f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
+                            f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
+                            f"✅ 볼린저 밴드: 하단 터치\n"
+                            f"   - 현재가: `{today['Close']:.2f}`\n"
+                            f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
+                            f"📊 차트를 확인하세요!"
+                        )
+                        
+                        chart_buf = draw_chart(df, ticker)
+                        if chart_buf:
+                            file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
+                            await channel.send(content=msg, file=file)
+                        else:
+                            await channel.send(content=msg)
+                        
+                        last_alert_dates[ticker] = current_date_str
+                        logging.info(f"✅ {ticker}: 알림 전송 완료 ({alert_count}번째)")
+                        
+                        # Discord 메시지 전송 간격 제한 (10초) - 다음 티커 체크 전 대기
+                        if alert_count > 0 and idx < len(TICKERS):
+                            logging.info(f"⏱️ Discord 메시지 간격 유지: {DISCORD_MESSAGE_INTERVAL}초 대기")
+                            await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
+                            
+                    except Exception as e:
+                        logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
                 else:
                     logging.info(f"⏭️ {ticker}: 조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨 - 건너뜀")
 
@@ -450,49 +473,12 @@ async def check_price():
         
         # 진행 상황 로그 (100개마다)
         if idx % 100 == 0:
-            logging.info(f"진행 중... {idx}/{len(TICKERS)} 완료")
+            logging.info(f"진행 중... {idx}/{len(TICKERS)} 완료, 알림 전송: {alert_count}개")
     
-    # 알림 전송 (Discord 메시지 간격 제한 적용)
-    if alerts_to_send:
-        logging.info(f"=== 알림 전송 시작: {len(alerts_to_send)}개 ===")
-        for idx, alert in enumerate(alerts_to_send, 1):
-            try:
-                ticker = alert['ticker']
-                today = alert['data']
-                df = alert['df']
-                now_kst = alert['now_kst']
-                
-                msg = (
-                    f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
-                    f"**조건 확인:**\n"
-                    f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
-                    f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
-                    f"✅ 볼린저 밴드: 하단 터치\n"
-                    f"   - 현재가: `{today['Close']:.2f}`\n"
-                    f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
-                    f"📊 차트를 확인하세요!"
-                )
-                
-                chart_buf = draw_chart(df, ticker)
-                if chart_buf:
-                    file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
-                    await channel.send(content=msg, file=file)
-                else:
-                    await channel.send(content=msg)
-                
-                logging.info(f">>> 알림 전송 완료 ({idx}/{len(alerts_to_send)}): {ticker}")
-                
-                # Discord 메시지 전송 간격 제한 (10초)
-                if idx < len(alerts_to_send):
-                    await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
-                    
-            except Exception as e:
-                logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
-        
-        logging.info(f"=== 알림 전송 완료: {len(alerts_to_send)}개 전송됨 ===")
-        
-        # 알람 날짜 정보 저장
+    # 알람 날짜 정보 저장
+    if alert_count > 0:
         save_alert_dates()
+        logging.info(f"=== 알림 전송 완료: 총 {alert_count}개 전송됨 ===")
     else:
         logging.info("=== 조건 만족 종목 없음 ===")
     
@@ -532,7 +518,12 @@ def run_bot():
             else:
                 logging.info("⏸ 감시 시간이 아닙니다. 대기 중...")
             
-            check_price.start()
+            # Task가 이미 실행 중이 아닐 때만 시작
+            if not check_price.is_running():
+                check_price.start()
+                logging.info("📊 체크 루프 시작됨")
+            else:
+                logging.info("⚠️ 체크 루프가 이미 실행 중입니다.")
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
