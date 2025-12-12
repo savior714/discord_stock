@@ -504,6 +504,14 @@ async def check_price():
     if alert_count > 0:
         save_alert_dates()
         logging.info(f"=== 알림 전송 완료: 총 {alert_count}개 전송됨 ===")
+        
+        # 알람을 보낸 티커를 리스트 상단으로 이동
+        alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) == today_str]
+        not_alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) != today_str]
+        TICKERS[:] = alerted_tickers + not_alerted_tickers
+        save_current_tickers()
+        
+        logging.info(f"📌 티커 목록 재정렬: 알람 전송된 {len(alerted_tickers)}개 티커를 상단으로 이동")
     else:
         logging.info("=== 조건 만족 종목 없음 ===")
     
