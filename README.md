@@ -218,12 +218,6 @@ python main.py
 ["AAPL", "TSLA", "MSFT", ...]
 ```
 
-### `ticker_history.json`
-최근 추가한 티커 히스토리 (최대 20개)
-```json
-["WELL", "AGNC", "CRDO", ...]
-```
-
 ### `alert_dates.json`
 각 티커별 마지막 알람 전송 날짜
 ```json
