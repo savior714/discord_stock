@@ -40,7 +40,9 @@ load_dotenv()
 # ================= 설정값 =================
 TOKEN = os.getenv('DISCORD_TOKEN', '')
 CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID', '')
-CHECK_SECONDS = 600  # 10분 (600초)
+CHECK_SECONDS = 1800  # 30분 (1800초)
+DISCORD_MESSAGE_INTERVAL = 10  # Discord 메시지 전송 간격 (초)
+MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 # ==========================================
 
 # 로깅 설정 (GUI용 핸들러 추가)
@@ -283,7 +285,7 @@ def draw_chart(df, ticker):
 @tasks.loop(seconds=CHECK_SECONDS)
 async def check_price():
     """
-    주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송 (다중 티커 지원)
+    주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송 (대규모 다중 티커 지원)
     """
     global last_alert_dates, TICKERS
     
@@ -298,8 +300,13 @@ async def check_price():
         logging.error(f"채널을 찾을 수 없습니다: {CHANNEL_ID}")
         return
 
+    logging.info(f"=== 감시 시작: {len(TICKERS)}개 티커 체크 ===")
+    
+    # 알림을 보낼 티커들을 모아서 처리 (Discord 메시지 간격 제한)
+    alerts_to_send = []
+    
     # 각 티커에 대해 체크
-    for ticker in TICKERS:
+    for idx, ticker in enumerate(TICKERS, 1):
         try:
             df = get_data_and_indicators(ticker)
             if df is None:
@@ -333,32 +340,67 @@ async def check_price():
             if all_conditions_met:
                 # 티커별로 마지막 알람 날짜 확인
                 if last_alert_dates.get(ticker) != current_date_str:
-                    msg = (
-                        f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
-                        f"**조건 확인:**\n"
-                        f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
-                        f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
-                        f"✅ 볼린저 밴드: 하단 터치\n"
-                        f"   - 현재가: `{today['Close']:.2f}`\n"
-                        f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
-                        f"📊 차트를 확인하세요!"
-                    )
-                    
-                    chart_buf = draw_chart(df, ticker)
-                    if chart_buf:
-                        file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
-                        await channel.send(content=msg, file=file)
-                        logging.info(f">>> 알림 전송 완료: {ticker} (날짜: {current_date_str})")
-                    else:
-                        await channel.send(content=msg)
-                        logging.warning(f"{ticker}: 차트 생성 실패, 텍스트만 전송")
-                    
+                    # 알림 대기열에 추가
+                    alerts_to_send.append({
+                        'ticker': ticker,
+                        'date': current_date_str,
+                        'data': today,
+                        'df': df,
+                        'now_kst': now_kst
+                    })
                     last_alert_dates[ticker] = current_date_str
                 else:
                     logging.debug(f"{ticker}: 조건 만족했으나 이미 오늘({current_date_str}) 알람 전송됨")
 
         except Exception as e:
             logging.error(f"{ticker} 체크 중 오류 발생: {e}", exc_info=True)
+        
+        # 진행 상황 로그 (100개마다)
+        if idx % 100 == 0:
+            logging.info(f"진행 중... {idx}/{len(TICKERS)} 완료")
+    
+    # 알림 전송 (Discord 메시지 간격 제한 적용)
+    if alerts_to_send:
+        logging.info(f"=== 알림 전송 시작: {len(alerts_to_send)}개 ===")
+        for idx, alert in enumerate(alerts_to_send, 1):
+            try:
+                ticker = alert['ticker']
+                today = alert['data']
+                df = alert['df']
+                now_kst = alert['now_kst']
+                
+                msg = (
+                    f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
+                    f"**조건 확인:**\n"
+                    f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
+                    f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
+                    f"✅ 볼린저 밴드: 하단 터치\n"
+                    f"   - 현재가: `{today['Close']:.2f}`\n"
+                    f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
+                    f"📊 차트를 확인하세요!"
+                )
+                
+                chart_buf = draw_chart(df, ticker)
+                if chart_buf:
+                    file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
+                    await channel.send(content=msg, file=file)
+                else:
+                    await channel.send(content=msg)
+                
+                logging.info(f">>> 알림 전송 완료 ({idx}/{len(alerts_to_send)}): {ticker}")
+                
+                # Discord 메시지 전송 간격 제한 (10초)
+                if idx < len(alerts_to_send):
+                    await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
+                    
+            except Exception as e:
+                logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
+        
+        logging.info(f"=== 알림 전송 완료: {len(alerts_to_send)}개 전송됨 ===")
+    else:
+        logging.info("=== 조건 만족 종목 없음 ===")
+    
+    logging.info(f"=== 감시 완료: {len(TICKERS)}개 티커 체크 완료 ===")
 
 # on_ready는 run_bot 함수 내부에서 정의됨
 
@@ -377,8 +419,11 @@ def run_bot():
         @client.event
         async def on_ready():
             logging.info(f'디스코드 봇 로그인 완료: {client.user}')
-            logging.info(f'감시 종목: {", ".join(TICKERS)} ({len(TICKERS)}개)')
-            logging.info(f'체크 주기: {CHECK_SECONDS}초 (10분)')
+            ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
+            logging.info(f'감시 종목: {ticker_preview} ({len(TICKERS)}개)')
+            logging.info(f'체크 주기: {CHECK_SECONDS}초 (30분)')
+            logging.info(f'Discord 메시지 간격: {DISCORD_MESSAGE_INTERVAL}초')
+            logging.info(f'최대 감시 가능: {MAX_TICKERS}개')
             logging.info(f'감시 시간: 오전 10시 ~ 새벽 4시 (KST)')
             
             kst = pytz.timezone('Asia/Seoul')
@@ -453,7 +498,10 @@ class StockBotGUI:
         self.status_label = ttk.Label(status_frame, text="대기 중...", font=('맑은 고딕', 10))
         self.status_label.pack(anchor=tk.W)
         
-        self.ticker_label = ttk.Label(status_frame, text="감시 종목: 없음", font=('맑은 고딕', 9), foreground='gray')
+        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "") if TICKERS else "없음"
+        self.ticker_label = ttk.Label(status_frame, 
+            text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)", 
+            font=('맑은 고딕', 9), foreground='gray')
         self.ticker_label.pack(anchor=tk.W)
         
         # 설정 확인
@@ -508,12 +556,25 @@ class StockBotGUI:
         
     def start_bot(self):
         """봇 시작"""
-        global TICKER, bot_running, bot_thread, last_alert_date
+        global TICKERS, bot_running, bot_thread, last_alert_dates
         
         # 티커 확인
-        ticker = self.ticker_entry.get().strip().upper()
-        if not ticker:
+        ticker_input = self.ticker_entry.get().strip().upper()
+        if not ticker_input:
             messagebox.showerror("오류", "종목 티커를 입력해주세요!")
+            return
+        
+        # 쉼표로 구분된 티커들을 파싱
+        new_tickers = [t.strip() for t in ticker_input.split(',') if t.strip()]
+        
+        if not new_tickers:
+            messagebox.showerror("오류", "유효한 티커를 입력해주세요!")
+            return
+        
+        # 최대 티커 수 체크
+        if len(TICKERS) + len(new_tickers) > MAX_TICKERS:
+            messagebox.showerror("제한 초과", 
+                f"최대 {MAX_TICKERS}개까지만 감시할 수 있습니다.\n현재 등록된 티커: {len(TICKERS)}개")
             return
         
         # 설정 확인
@@ -529,20 +590,24 @@ class StockBotGUI:
             messagebox.showwarning("경고", "봇이 이미 실행 중입니다!")
             return
         
-        TICKER = ticker
-        last_alert_date = None
+        # 티커 추가
+        add_tickers(new_tickers)
+        
         bot_running = True
         
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
         self.ticker_entry.config(state=tk.DISABLED)
         self.status_label.config(text="🟢 실행 중...")
-        self.ticker_label.config(text=f"감시 종목: {TICKER}")
+        
+        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
+        self.ticker_label.config(text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)")
         
         self.add_log("")
         self.add_log(f"[시작] 봇을 시작합니다...")
-        self.add_log(f"[설정] 감시 종목: {TICKER}")
-        self.add_log(f"[설정] 체크 주기: {CHECK_SECONDS}초 (10분)")
+        self.add_log(f"[설정] 감시 종목: {ticker_preview} (총 {len(TICKERS)}개)")
+        self.add_log(f"[설정] 체크 주기: {CHECK_SECONDS}초 (30분)")
+        self.add_log(f"[설정] Discord 메시지 간격: {DISCORD_MESSAGE_INTERVAL}초")
         self.add_log(f"[설정] 감시 시간: 오전 10시 ~ 새벽 4시 (KST)")
         self.add_log("")
         
