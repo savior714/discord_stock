@@ -880,10 +880,13 @@ class StockBotGUI:
         self.ticker_tree = ttk.Treeview(ticker_scroll_frame, columns=columns, show='headings', 
                                         height=8, yscrollcommand=ticker_scrollbar.set)
         
-        # 컬럼 설정
-        self.ticker_tree.heading('번호', text='번호')
-        self.ticker_tree.heading('티커', text='티커')
-        self.ticker_tree.heading('마지막 알람', text='마지막 알람 날짜')
+        # 정렬 상태 저장 (컬럼명: (reverse, last_sort_column))
+        self.sort_state = {'번호': False, '티커': False, '마지막 알람': False}
+        
+        # 컬럼 설정 (클릭 시 정렬)
+        self.ticker_tree.heading('번호', text='번호', command=lambda: self.sort_ticker_list('번호'))
+        self.ticker_tree.heading('티커', text='티커', command=lambda: self.sort_ticker_list('티커'))
+        self.ticker_tree.heading('마지막 알람', text='마지막 알람 날짜', command=lambda: self.sort_ticker_list('마지막 알람'))
         
         self.ticker_tree.column('번호', width=50, anchor='center')
         self.ticker_tree.column('티커', width=100, anchor='center')
@@ -989,6 +992,52 @@ class StockBotGUI:
         """검색 초기화"""
         self.search_entry.delete(0, tk.END)
         self.refresh_ticker_list()
+    
+    def sort_ticker_list(self, column):
+        """티커 목록 정렬 (클릭한 컬럼 기준)"""
+        # 현재 정렬 상태 토글
+        reverse = self.sort_state[column]
+        self.sort_state[column] = not reverse
+        
+        # 현재 표시된 항목들을 가져오기
+        items = [(self.ticker_tree.set(item, column), item) for item in self.ticker_tree.get_children('')]
+        
+        # 정렬 (번호는 숫자로, 나머지는 문자열로)
+        if column == '번호':
+            items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=reverse)
+        elif column == '마지막 알람':
+            # '없음'은 맨 뒤로, 날짜는 정렬
+            def sort_key(x):
+                if x[0] == '없음':
+                    return ('9999-99-99', x[0]) if not reverse else ('0000-00-00', x[0])
+                return (x[0], x[0])
+            items.sort(key=sort_key, reverse=reverse)
+        else:
+            # 티커는 알파벳 순
+            items.sort(key=lambda x: x[0], reverse=reverse)
+        
+        # 정렬된 순서로 재배치
+        for index, (val, item) in enumerate(items):
+            self.ticker_tree.move(item, '', index)
+        
+        # 헤더 텍스트 업데이트 (정렬 방향 표시)
+        arrow = '▼' if reverse else '▲'
+        if column == '번호':
+            self.ticker_tree.heading('번호', text=f'번호 {arrow}')
+        elif column == '티커':
+            self.ticker_tree.heading('티커', text=f'티커 {arrow}')
+        elif column == '마지막 알람':
+            self.ticker_tree.heading('마지막 알람', text=f'마지막 알람 날짜 {arrow}')
+        
+        # 다른 컬럼 헤더는 화살표 제거
+        for col in ['번호', '티커', '마지막 알람']:
+            if col != column:
+                if col == '번호':
+                    self.ticker_tree.heading('번호', text='번호')
+                elif col == '티커':
+                    self.ticker_tree.heading('티커', text='티커')
+                elif col == '마지막 알람':
+                    self.ticker_tree.heading('마지막 알람', text='마지막 알람 날짜')
     
     def delete_selected_ticker(self):
         """선택한 티커 삭제"""
