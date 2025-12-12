@@ -84,6 +84,12 @@ client = None
 TICKER_HISTORY_FILE = 'ticker_history.json'
 MAX_HISTORY = 20
 
+# 초기 티커 로드 (.env 파일에서)
+initial_ticker = os.getenv('TICKER', '').strip().upper()
+if initial_ticker:
+    TICKERS = [initial_ticker]
+    logging.info(f"초기 티커 로드: {initial_ticker}")
+
 def load_ticker_history():
     """티커 히스토리 불러오기"""
     if os.path.exists(TICKER_HISTORY_FILE):
@@ -113,11 +119,15 @@ def add_tickers(new_tickers):
     """티커 리스트에 새로운 티커 추가"""
     global TICKERS
     
+    added_count = 0
     for ticker in new_tickers:
         ticker = ticker.strip().upper()
         if ticker and ticker not in TICKERS:
             TICKERS.append(ticker)
-            logging.info(f"티커 추가: {ticker}")
+            logging.info(f"✅ 티커 추가: {ticker}")
+            added_count += 1
+        elif ticker in TICKERS:
+            logging.info(f"⚠️ 이미 등록된 티커: {ticker}")
     
     # 히스토리에 저장
     history = load_ticker_history()
@@ -126,7 +136,8 @@ def add_tickers(new_tickers):
             history.insert(0, ticker)
     save_ticker_history(history)
     
-    logging.info(f"현재 감시 중인 티커: {len(TICKERS)}개")
+    logging.info(f"📊 총 {added_count}개 티커 추가됨. 현재 감시 중인 티커: {len(TICKERS)}개")
+    logging.info(f"📋 전체 티커 목록: {', '.join(TICKERS)}")
 
 def is_active_time():
     """
@@ -500,11 +511,18 @@ class StockBotGUI:
         top_frame.pack(fill=tk.X)
         
         # 티커 입력
-        ttk.Label(top_frame, text="종목 티커:", font=('맑은 고딕', 10)).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
-        self.ticker_entry = ttk.Entry(top_frame, width=20, font=('맑은 고딕', 10))
+        ttk.Label(top_frame, text="종목 티커 (쉼표로 구분):", font=('맑은 고딕', 10)).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        self.ticker_entry = ttk.Entry(top_frame, width=50, font=('맑은 고딕', 10))
         self.ticker_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.ticker_entry.insert(0, os.getenv('TICKER', 'AAPL'))
-        ttk.Label(top_frame, text="(예: AAPL, TSLA, 005930.KS)", font=('맑은 고딕', 9), foreground='gray').grid(row=0, column=2, padx=5, sticky=tk.W)
+        
+        # 기존 티커가 있으면 표시, 없으면 예시
+        if TICKERS:
+            self.ticker_entry.insert(0, ', '.join(TICKERS[:5]))
+        else:
+            self.ticker_entry.insert(0, 'AAPL, TSLA, MSFT')
+        
+        ttk.Label(top_frame, text=f"(최대 {MAX_TICKERS}개 | 현재: {len(TICKERS)}개)", 
+                 font=('맑은 고딕', 9), foreground='gray').grid(row=0, column=2, padx=5, sticky=tk.W)
         
         # 버튼 프레임
         button_frame = ttk.Frame(top_frame)
@@ -630,7 +648,10 @@ class StockBotGUI:
         
         self.add_log("")
         self.add_log(f"[시작] 봇을 시작합니다...")
-        self.add_log(f"[설정] 감시 종목: {ticker_preview} (총 {len(TICKERS)}개)")
+        self.add_log(f"[등록] 새로 추가된 티커: {', '.join(new_tickers)}")
+        self.add_log(f"[설정] 전체 감시 종목: {ticker_preview} (총 {len(TICKERS)}개)")
+        if len(TICKERS) > 10:
+            self.add_log(f"[상세] 전체 티커 목록: {', '.join(TICKERS)}")
         self.add_log(f"[설정] 체크 주기: {CHECK_SECONDS}초 (30분)")
         self.add_log(f"[설정] Discord 메시지 간격: {DISCORD_MESSAGE_INTERVAL}초")
         self.add_log(f"[설정] 감시 시간: 오전 10시 ~ 새벽 4시 (KST)")
