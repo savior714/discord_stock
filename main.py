@@ -104,6 +104,25 @@ def save_ticker_history(tickers):
         logging.error(f"티커 히스토리 저장 오류: {e}")
         return False
 
+def add_tickers(new_tickers):
+    """티커 리스트에 새로운 티커 추가"""
+    global TICKERS
+    
+    for ticker in new_tickers:
+        ticker = ticker.strip().upper()
+        if ticker and ticker not in TICKERS:
+            TICKERS.append(ticker)
+            logging.info(f"티커 추가: {ticker}")
+    
+    # 히스토리에 저장
+    history = load_ticker_history()
+    for ticker in new_tickers:
+        if ticker not in history:
+            history.insert(0, ticker)
+    save_ticker_history(history)
+    
+    logging.info(f"현재 감시 중인 티커: {len(TICKERS)}개")
+
 def is_active_time():
     """
     현재 시간이 한국 시간(KST) 기준 오전 10시 ~ 새벽 4시 사이인지 확인
