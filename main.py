@@ -996,11 +996,15 @@ class StockBotGUI:
             self.status_canvas.itemconfig(self.status_indicator, fill=fill_color, outline=outline_color)
             self.status_label.config(text=message)
     
-    def refresh_ticker_list(self, filter_text=''):
+    def refresh_ticker_list(self, filter_text=None):
         """티커 목록 테이블 새로고침 (검색 필터 지원)"""
         # 기존 항목 삭제
         for item in self.ticker_tree.get_children():
             self.ticker_tree.delete(item)
+        
+        # filter_text가 None이면 현재 검색 입력 필드의 값을 사용
+        if filter_text is None:
+            filter_text = self.search_entry.get()
         
         # 검색 필터 적용
         filter_text = filter_text.strip().upper()
