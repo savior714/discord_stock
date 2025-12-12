@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 import numpy as np
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import pytz
 import os
 from dotenv import load_dotenv
@@ -85,8 +85,35 @@ bot_thread = None
 loop = None
 client = None
 gui_instance = None  # GUI 인스턴스 저장
+TICKER_HISTORY_FILE = 'ticker_history.json'
 TICKER_SAVE_FILE = 'current_tickers.json'  # 현재 감시 중인 티커 저장 파일
 ALERT_DATES_FILE = 'alert_dates.json'  # 알람 날짜 저장 파일
+MAX_HISTORY = 20
+
+def load_ticker_history():
+    """티커 히스토리 불러오기"""
+    if os.path.exists(TICKER_HISTORY_FILE):
+        try:
+            with open(TICKER_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_ticker_history(tickers):
+    """티커 히스토리 저장"""
+    try:
+        unique_tickers = []
+        for ticker in tickers:
+            if ticker not in unique_tickers:
+                unique_tickers.append(ticker)
+        unique_tickers = unique_tickers[:MAX_HISTORY]
+        with open(TICKER_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(unique_tickers, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logging.error(f"티커 히스토리 저장 오류: {e}")
+        return False
 
 def load_current_tickers():
     """현재 감시 중인 티커 목록 불러오기"""
@@ -120,7 +147,18 @@ def load_alert_dates():
                 dates = json.load(f)
                 if isinstance(dates, dict):
                     logging.info(f"알람 날짜 정보 불러오기: {len(dates)}개 티커")
-                    return dates
+                    # 기존 날짜를 장일 기준으로 변환 (하위 호환성)
+                    converted_dates = {}
+                    for ticker, date_str in dates.items():
+                        try:
+                            # 날짜 문자열을 파싱하여 장일 기준으로 재계산
+                            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                            # 해당 날짜의 오전 10시 이후 시간으로 가정 (장일 시작)
+                            # 저장된 날짜가 장일의 시작일이므로 그대로 사용
+                            converted_dates[ticker] = date_str
+                        except:
+                            converted_dates[ticker] = date_str
+                    return converted_dates
         except Exception as e:
             logging.error(f"알람 날짜 불러오기 오류: {e}")
     return {}
@@ -157,6 +195,13 @@ def add_tickers(new_tickers):
             logging.info(f"⚠️ 이미 등록된 티커 (건너뜀): {ticker_normalized}")
             skipped_count += 1
     
+    # 히스토리에 저장 (정규화된 대문자 버전 사용)
+    history = load_ticker_history()
+    for ticker in normalized_tickers:
+        if ticker not in history:
+            history.insert(0, ticker)
+    save_ticker_history(history)
+    
     # 현재 티커 목록 저장
     save_current_tickers()
     
@@ -176,6 +221,27 @@ def is_active_time():
     if now >= start_time or now < end_time:
         return True
     return False
+
+def get_trading_day():
+    """
+    장일 기준 날짜 반환 (오전 10시 이후부터 새로운 장일로 인식)
+    
+    예시:
+    - 2025-12-12 23:00 → 2025-12-12 (장일)
+    - 2025-12-13 01:00 → 2025-12-12 (아직 전날 장일)
+    - 2025-12-13 10:00 → 2025-12-13 (새로운 장일 시작)
+    """
+    kst = pytz.timezone('Asia/Seoul')
+    now = datetime.now(kst)
+    current_time = now.time()
+    
+    # 오전 10시 이전이면 전날로 처리 (새벽 4시~오전 10시는 전날 장일의 연장)
+    if current_time < time(10, 0, 0):
+        yesterday = now - timedelta(days=1)
+        return yesterday.strftime('%Y-%m-%d')
+    else:
+        # 오전 10시 이후부터는 오늘 날짜가 새로운 장일
+        return now.strftime('%Y-%m-%d')
 
 def calculate_rsi_wilders(prices, period=14):
     """
@@ -532,25 +598,30 @@ async def check_price():
         logging.error(f"채널을 찾을 수 없습니다: {CHANNEL_ID}")
         return
 
-    # 현재 날짜 확인
+    # 장일 기준 날짜 확인 (오전 10시 이후부터 새로운 장일)
+    trading_day_str = get_trading_day()
     kst = pytz.timezone('Asia/Seoul')
-    today_str = datetime.now(kst).strftime('%Y-%m-%d')
+    now_kst = datetime.now(kst)
+    logging.info(f"📅 현재 시간: {now_kst.strftime('%Y-%m-%d %H:%M:%S')} (KST) → 장일: {trading_day_str}")
     
-    # 오늘 알람을 보낸 티커 필터링 (당일 제외)
+    # 오늘 장일 알람을 보낸 티커 필터링 (당일 제외)
     tickers_to_check = []
     skipped_today = []
     
     for ticker in TICKERS:
         last_alert = last_alert_dates.get(ticker)
-        if last_alert == today_str:
-            # 오늘 이미 알람을 보낸 티커는 건너뜀
+        if last_alert == trading_day_str:
+            # 오늘 장일 이미 알람을 보낸 티커는 건너뜀
             skipped_today.append(ticker)
+            logging.info(f"⏭️ {ticker}: 장일 {trading_day_str}에 이미 알람 전송됨 (마지막 알람: {last_alert})")
         else:
             tickers_to_check.append(ticker)
+            if last_alert:
+                logging.info(f"✅ {ticker}: 체크 대상 (마지막 알람: {last_alert}, 현재 장일: {trading_day_str})")
     
     logging.info(f"=== 감시 시작: 전체 {len(TICKERS)}개 중 {len(tickers_to_check)}개 체크 ===")
     if skipped_today:
-        logging.info(f"⏭️ 오늘 이미 알람 전송된 티커 ({len(skipped_today)}개): {', '.join(skipped_today[:10])}{'...' if len(skipped_today) > 10 else ''}")
+        logging.info(f"⏭️ 오늘 장일({trading_day_str}) 이미 알람 전송된 티커 ({len(skipped_today)}개): {', '.join(skipped_today[:10])}{'...' if len(skipped_today) > 10 else ''}")
     
     # 병렬 처리 시작 시간 기록
     start_time = time_module.time()
@@ -636,8 +707,8 @@ async def check_price():
                 else:
                     await channel.send(content=msg)
                 
-                # 오늘 날짜로 알람 날짜 기록
-                last_alert_dates[ticker] = today_str
+                # 오늘 장일 날짜로 알람 날짜 기록
+                last_alert_dates[ticker] = trading_day_str
                 logging.info(f"✅ {ticker}: 알림 전송 완료 ({alert_count}/{len(alerted_tickers_list)})")
                 
                 # Discord 메시지 전송 간격 제한
@@ -653,8 +724,8 @@ async def check_price():
         logging.info(f"=== 알림 전송 완료: 총 {alert_count}개 전송됨 ===")
         
         # 알람을 보낸 티커를 리스트 상단으로 이동
-        alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) == today_str]
-        not_alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) != today_str]
+        alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) == trading_day_str]
+        not_alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) != trading_day_str]
         TICKERS[:] = alerted_tickers + not_alerted_tickers
         save_current_tickers()
         
@@ -787,6 +858,9 @@ class StockBotGUI:
             # 복원된 알람 날짜 상세 로그
             for ticker, date in saved_alert_dates.items():
                 logging.info(f"   - {ticker}: {date}")
+        
+        # 티커 히스토리 로드
+        self.ticker_history = load_ticker_history()
         
         self.setup_ui()
         self.process_log_queue()
