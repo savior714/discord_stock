@@ -584,19 +584,6 @@ class StockBotGUI:
             font=('맑은 고딕', 9), foreground='gray')
         self.ticker_label.pack(anchor=tk.W)
         
-        # 설정 확인
-        config_frame = ttk.LabelFrame(self.root, text="설정 확인", padding="10")
-        config_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        token_status = "✅ 설정됨" if TOKEN and TOKEN != '여기에_디스코드_봇_토큰' else "❌ 미설정"
-        channel_status = "✅ 설정됨" if CHANNEL_ID and CHANNEL_ID != '123456789012345678' else "❌ 미설정"
-        
-        ttk.Label(config_frame, text=f"Discord 토큰: {token_status}", font=('맑은 고딕', 9)).pack(anchor=tk.W)
-        ttk.Label(config_frame, text=f"채널 ID: {channel_status}", font=('맑은 고딕', 9)).pack(anchor=tk.W)
-        
-        if token_status == "❌ 미설정" or channel_status == "❌ 미설정":
-            ttk.Label(config_frame, text="⚠️ .env 파일을 확인하세요!", font=('맑은 고딕', 9), foreground='red').pack(anchor=tk.W, pady=5)
-        
         # 로그 영역
         log_frame = ttk.LabelFrame(self.root, text="로그", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -644,8 +631,8 @@ class StockBotGUI:
         self.root.after(100, self.process_log_queue)
         
     def add_tickers_only(self):
-        """티커만 추가 (봇 시작 없이)"""
-        global TICKERS
+        """티커만 추가 (봇 실행 중에도 가능)"""
+        global TICKERS, last_alert_dates
         
         # 티커 확인
         ticker_input = self.ticker_entry.get().strip().upper()
@@ -669,6 +656,18 @@ class StockBotGUI:
         # 티커 추가
         add_tickers(new_tickers)
         
+        # 새로 추가된 티커의 알람 날짜를 오늘로 설정 (중복 알람 방지)
+        from datetime import datetime
+        import pytz
+        kst = pytz.timezone('Asia/Seoul')
+        today_str = datetime.now(kst).strftime('%Y-%m-%d')
+        
+        for ticker in new_tickers:
+            if ticker not in last_alert_dates:
+                # 오늘 날짜로 설정하여 이미 알람을 보낸 것처럼 처리
+                last_alert_dates[ticker] = today_str
+                logging.info(f"🔒 {ticker}: 중복 알람 방지 설정 (오늘 날짜: {today_str})")
+        
         # UI 업데이트
         ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "") if TICKERS else "없음"
         self.ticker_label.config(text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)")
@@ -677,10 +676,23 @@ class StockBotGUI:
         # 입력 필드 초기화
         self.ticker_entry.delete(0, tk.END)
         
-        self.add_log(f"[추가] 티커 추가 완료: {', '.join(new_tickers)}")
+        if bot_running:
+            self.add_log(f"[추가] 티커 추가 완료 (봇 실행 중): {', '.join(new_tickers)}")
+            self.add_log(f"[안내] 다음 체크 주기부터 새 티커가 감시됩니다.")
+            self.add_log(f"[안내] 중복 알람 방지: 오늘은 알람을 보내지 않습니다.")
+        else:
+            self.add_log(f"[추가] 티커 추가 완료: {', '.join(new_tickers)}")
+        
         self.add_log(f"[현황] 전체 감시 종목: {len(TICKERS)}개")
         
-        messagebox.showinfo("추가 완료", f"{len(new_tickers)}개 티커가 추가되었습니다.\n현재 총 {len(TICKERS)}개 감시 중")
+        if bot_running:
+            messagebox.showinfo("추가 완료", 
+                f"{len(new_tickers)}개 티커가 추가되었습니다.\n"
+                f"현재 총 {len(TICKERS)}개 감시 중\n\n"
+                f"※ 다음 체크 주기부터 감시됩니다.\n"
+                f"※ 오늘은 중복 알람을 방지합니다.")
+        else:
+            messagebox.showinfo("추가 완료", f"{len(new_tickers)}개 티커가 추가되었습니다.\n현재 총 {len(TICKERS)}개 감시 중")
     
     def clear_all_tickers(self):
         """전체 티커 삭제"""
@@ -729,8 +741,9 @@ class StockBotGUI:
         
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
-        self.ticker_entry.config(state=tk.DISABLED)
-        self.add_ticker_button.config(state=tk.DISABLED)
+        # 티커 추가는 봇 실행 중에도 가능하도록 활성화 유지
+        # self.ticker_entry.config(state=tk.DISABLED)
+        # self.add_ticker_button.config(state=tk.DISABLED)
         self.clear_button.config(state=tk.DISABLED)
         self.status_label.config(text="🟢 실행 중...")
         
@@ -762,8 +775,9 @@ class StockBotGUI:
         
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
-        self.ticker_entry.config(state=tk.NORMAL)
-        self.add_ticker_button.config(state=tk.NORMAL)
+        # 티커 추가는 항상 활성화되어 있으므로 상태 변경 불필요
+        # self.ticker_entry.config(state=tk.NORMAL)
+        # self.add_ticker_button.config(state=tk.NORMAL)
         self.clear_button.config(state=tk.NORMAL)
         self.status_label.config(text="🔴 중지됨")
         
