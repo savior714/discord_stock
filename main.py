@@ -246,14 +246,20 @@ def get_data_and_indicators(ticker):
     일봉 데이터와 보조지표 계산
     """
     try:
-        # FutureWarning 억제
+        # FutureWarning 및 yfinance 경고 억제
         import warnings
         warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
+        warnings.filterwarnings('ignore', message='.*possibly delisted.*')
+        
+        # yfinance 로거 레벨 조정 (에러 메시지 억제)
+        import logging as yf_logging
+        yf_logging.getLogger('yfinance').setLevel(yf_logging.CRITICAL)
         
         df = yf.download(ticker, period='6mo', interval='1d', progress=False, auto_adjust=True)
         
         if df.empty or len(df) < 20:
-            logging.warning(f"데이터 부족: {len(df)}개 행만 수신됨")
+            # 간단한 경고만 표시 (상세 에러는 생략)
+            logging.debug(f"{ticker}: 데이터 부족 또는 없음")
             return None
         
         # MultiIndex 컬럼을 단순 컬럼으로 변환 (yfinance 최신 버전 대응)
@@ -264,7 +270,7 @@ def get_data_and_indicators(ticker):
         df = df.dropna(subset=['Close', 'High', 'Low', 'Volume'])
         
         if len(df) < 20:
-            logging.warning("NaN 제거 후 데이터 부족")
+            logging.debug(f"{ticker}: NaN 제거 후 데이터 부족")
             return None
         
         df['RSI'] = calculate_rsi_wilders(df['Close'], period=14)
