@@ -417,7 +417,7 @@ async def check_price():
         try:
             df = get_data_and_indicators(ticker)
             if df is None:
-                logging.warning(f"{ticker}: 데이터를 가져올 수 없습니다.")
+                # 데이터를 가져올 수 없는 경우 조용히 건너뜀 (이미 get_data_and_indicators에서 로그됨)
                 continue
 
             today = df.iloc[-1]
