@@ -828,11 +828,7 @@ class StockBotGUI:
         ticker_list_frame = ttk.LabelFrame(self.root, text="등록된 티커 목록", padding="10")
         ticker_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # 스크롤바가 있는 프레임
-        ticker_scroll_frame = ttk.Frame(ticker_list_frame)
-        ticker_scroll_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # 검색 프레임
+        # 검색 프레임 (먼저 pack하여 상단에 배치)
         search_frame = ttk.Frame(ticker_list_frame)
         search_frame.pack(fill=tk.X, pady=(0, 5))
         
@@ -846,6 +842,10 @@ class StockBotGUI:
         
         self.search_result_label = ttk.Label(search_frame, text="", font=('맑은 고딕', 9), foreground='gray')
         self.search_result_label.pack(side=tk.LEFT, padx=5)
+        
+        # 스크롤바가 있는 프레임 (검색 프레임 다음에 pack하여 expand)
+        ticker_scroll_frame = ttk.Frame(ticker_list_frame)
+        ticker_scroll_frame.pack(fill=tk.BOTH, expand=True)
         
         # 스크롤바
         ticker_scrollbar = ttk.Scrollbar(ticker_scroll_frame)
