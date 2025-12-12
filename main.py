@@ -892,6 +892,9 @@ class StockBotGUI:
         self.clear_button.config(state=tk.DISABLED)
         self.status_label.config(text="🟢 실행 중...")
         
+        # 티커 미리보기 생성
+        ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "")
+        
         self.add_log("")
         self.add_log(f"[시작] 봇을 시작합니다...")
         self.add_log(f"[설정] 전체 감시 종목: {ticker_preview} (총 {len(TICKERS)}개)")
