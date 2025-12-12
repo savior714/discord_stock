@@ -85,35 +85,8 @@ bot_thread = None
 loop = None
 client = None
 gui_instance = None  # GUI 인스턴스 저장
-TICKER_HISTORY_FILE = 'ticker_history.json'
 TICKER_SAVE_FILE = 'current_tickers.json'  # 현재 감시 중인 티커 저장 파일
 ALERT_DATES_FILE = 'alert_dates.json'  # 알람 날짜 저장 파일
-MAX_HISTORY = 20
-
-def load_ticker_history():
-    """티커 히스토리 불러오기"""
-    if os.path.exists(TICKER_HISTORY_FILE):
-        try:
-            with open(TICKER_HISTORY_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_ticker_history(tickers):
-    """티커 히스토리 저장"""
-    try:
-        unique_tickers = []
-        for ticker in tickers:
-            if ticker not in unique_tickers:
-                unique_tickers.append(ticker)
-        unique_tickers = unique_tickers[:MAX_HISTORY]
-        with open(TICKER_HISTORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(unique_tickers, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        logging.error(f"티커 히스토리 저장 오류: {e}")
-        return False
 
 def load_current_tickers():
     """현재 감시 중인 티커 목록 불러오기"""
@@ -183,13 +156,6 @@ def add_tickers(new_tickers):
         elif ticker_normalized in TICKERS:
             logging.info(f"⚠️ 이미 등록된 티커 (건너뜀): {ticker_normalized}")
             skipped_count += 1
-    
-    # 히스토리에 저장 (정규화된 대문자 버전 사용)
-    history = load_ticker_history()
-    for ticker in normalized_tickers:
-        if ticker not in history:
-            history.insert(0, ticker)
-    save_ticker_history(history)
     
     # 현재 티커 목록 저장
     save_current_tickers()
@@ -821,9 +787,6 @@ class StockBotGUI:
             # 복원된 알람 날짜 상세 로그
             for ticker, date in saved_alert_dates.items():
                 logging.info(f"   - {ticker}: {date}")
-        
-        # 티커 히스토리 로드
-        self.ticker_history = load_ticker_history()
         
         self.setup_ui()
         self.process_log_queue()
