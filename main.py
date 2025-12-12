@@ -83,6 +83,7 @@ loop = None
 client = None
 TICKER_HISTORY_FILE = 'ticker_history.json'
 TICKER_SAVE_FILE = 'current_tickers.json'  # 현재 감시 중인 티커 저장 파일
+ALERT_DATES_FILE = 'alert_dates.json'  # 알람 날짜 저장 파일
 MAX_HISTORY = 20
 
 def load_ticker_history():
@@ -132,6 +133,30 @@ def save_current_tickers():
         return True
     except Exception as e:
         logging.error(f"티커 저장 오류: {e}")
+        return False
+
+def load_alert_dates():
+    """알람 날짜 정보 불러오기"""
+    if os.path.exists(ALERT_DATES_FILE):
+        try:
+            with open(ALERT_DATES_FILE, 'r', encoding='utf-8') as f:
+                dates = json.load(f)
+                if isinstance(dates, dict):
+                    logging.info(f"알람 날짜 정보 불러오기: {len(dates)}개 티커")
+                    return dates
+        except Exception as e:
+            logging.error(f"알람 날짜 불러오기 오류: {e}")
+    return {}
+
+def save_alert_dates():
+    """알람 날짜 정보 저장"""
+    try:
+        with open(ALERT_DATES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(last_alert_dates, f, ensure_ascii=False, indent=2)
+        logging.debug(f"알람 날짜 저장 완료: {len(last_alert_dates)}개")
+        return True
+    except Exception as e:
+        logging.error(f"알람 날짜 저장 오류: {e}")
         return False
 
 def add_tickers(new_tickers):
@@ -458,6 +483,9 @@ async def check_price():
                 logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
         
         logging.info(f"=== 알림 전송 완료: {len(alerts_to_send)}개 전송됨 ===")
+        
+        # 알람 날짜 정보 저장
+        save_alert_dates()
     else:
         logging.info("=== 조건 만족 종목 없음 ===")
     
@@ -515,7 +543,7 @@ def run_bot():
 
 class StockBotGUI:
     def __init__(self, root):
-        global TICKERS
+        global TICKERS, last_alert_dates
         
         self.root = root
         self.root.title("Discord 주가 알람 봇 - 다중 티커 감시")
@@ -531,6 +559,12 @@ class StockBotGUI:
         if saved_tickers:
             TICKERS = saved_tickers
             logging.info(f"💾 이전 세션의 티커 복원: {len(TICKERS)}개")
+        
+        # 저장된 알람 날짜 불러오기
+        saved_alert_dates = load_alert_dates()
+        if saved_alert_dates:
+            last_alert_dates = saved_alert_dates
+            logging.info(f"📅 알람 날짜 정보 복원: {len(last_alert_dates)}개")
         
         # 티커 히스토리 로드
         self.ticker_history = load_ticker_history()
