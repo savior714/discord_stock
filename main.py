@@ -170,19 +170,23 @@ def add_tickers(new_tickers):
     added_count = 0
     skipped_count = 0
     
+    # 정규화된 티커 목록 (대문자 변환)
+    normalized_tickers = []
+    
     for ticker in new_tickers:
-        ticker = ticker.strip().upper()
-        if ticker and ticker not in TICKERS:
-            TICKERS.append(ticker)
-            logging.info(f"✅ 티커 추가: {ticker}")
+        ticker_normalized = ticker.strip().upper()
+        if ticker_normalized and ticker_normalized not in TICKERS:
+            TICKERS.append(ticker_normalized)
+            normalized_tickers.append(ticker_normalized)
+            logging.info(f"✅ 티커 추가: {ticker_normalized}")
             added_count += 1
-        elif ticker in TICKERS:
-            logging.info(f"⚠️ 이미 등록된 티커 (건너뜀): {ticker}")
+        elif ticker_normalized in TICKERS:
+            logging.info(f"⚠️ 이미 등록된 티커 (건너뜀): {ticker_normalized}")
             skipped_count += 1
     
-    # 히스토리에 저장
+    # 히스토리에 저장 (정규화된 대문자 버전 사용)
     history = load_ticker_history()
-    for ticker in new_tickers:
+    for ticker in normalized_tickers:
         if ticker not in history:
             history.insert(0, ticker)
     save_ticker_history(history)
