@@ -67,6 +67,11 @@ logging.basicConfig(
     ]
 )
 
+# Discord 라이브러리의 불필요한 경고 숨기기
+logging.getLogger('discord').setLevel(logging.ERROR)
+logging.getLogger('discord.client').setLevel(logging.ERROR)
+logging.getLogger('discord.gateway').setLevel(logging.ERROR)
+
 plt.switch_backend('Agg')
 
 # 전역 변수
@@ -430,8 +435,9 @@ def run_bot():
     global loop, TICKERS, bot_running, client
     
     try:
-        # 새로운 Discord client 생성
+        # 새로운 Discord client 생성 (음성 기능 비활성화)
         intents = discord.Intents.default()
+        intents.voice_states = False  # 음성 상태 비활성화
         client = discord.Client(intents=intents)
         
         # on_ready 이벤트 핸들러 등록
