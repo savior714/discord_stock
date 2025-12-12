@@ -14,6 +14,8 @@ import threading
 import asyncio
 import queue
 import json
+from concurrent.futures import ThreadPoolExecutor
+import time as time_module
 
 # tkinter import (필수)
 try:
@@ -43,6 +45,7 @@ CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID', '')
 CHECK_SECONDS = 1800  # 30분 (1800초)
 DISCORD_MESSAGE_INTERVAL = 10  # Discord 메시지 전송 간격 (초)
 MAX_TICKERS = 500  # 최대 감시 가능 티커 수
+PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
 # ==========================================
 
 # 로깅 설정 (GUI용 핸들러 추가)
@@ -244,7 +247,7 @@ def calculate_mfi(df, period=14):
 
 def get_data_and_indicators(ticker):
     """
-    일봉 데이터와 보조지표 계산
+    일봉 데이터와 보조지표 계산 (동기 버전 - 병렬 처리용)
     """
     try:
         # FutureWarning 및 yfinance 경고 억제
@@ -313,6 +316,51 @@ def check_bollinger_touch(df):
     close_to_lower = abs(current['Close'] - current['BB_Lower']) / current['BB_Lower'] < 0.001
     
     return current_touch or close_to_lower
+
+def analyze_ticker(ticker):
+    """
+    단일 티커 분석 (병렬 처리용)
+    데이터 다운로드 및 조건 체크를 수행하고 결과 반환
+    """
+    try:
+        df = get_data_and_indicators(ticker)
+        if df is None:
+            return None
+
+        today = df.iloc[-1]
+        current_date = df.index[-1]
+        current_date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)[:10]
+        
+        cond_mfi = today['MFI'] < 35
+        cond_rsi = today['RSI'] < 35
+        cond_bb = check_bollinger_touch(df)
+        
+        all_conditions_met = cond_mfi and cond_rsi and cond_bb
+        
+        kst = pytz.timezone('Asia/Seoul')
+        now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+        
+        status_icon = "✅" if all_conditions_met else "❌"
+        logging.info(
+            f"[{now_kst}] {status_icon} {ticker} | "
+            f"Date: {current_date_str} | "
+            f"Price: {today['Close']:.2f} | "
+            f"RSI: {today['RSI']:.2f} {'✓' if cond_rsi else '✗'} | "
+            f"MFI: {today['MFI']:.2f} {'✓' if cond_mfi else '✗'} | "
+            f"BB: {'✓' if cond_bb else '✗'} "
+            f"(Lower: {today['BB_Lower']:.2f})"
+        )
+        
+        return {
+            'ticker': ticker,
+            'df': df,
+            'today': today,
+            'now_kst': now_kst,
+            'alert': all_conditions_met
+        }
+    except Exception as e:
+        logging.error(f"{ticker} 분석 중 오류: {e}")
+        return None
 
 def draw_chart(df, ticker):
     """
@@ -423,83 +471,89 @@ async def check_price():
     if skipped_today:
         logging.info(f"⏭️ 오늘 이미 알람 전송된 티커 ({len(skipped_today)}개): {', '.join(skipped_today[:10])}{'...' if len(skipped_today) > 10 else ''}")
     
+    # 병렬 처리 시작 시간 기록
+    start_time = time_module.time()
+    
     # 알림 전송 카운터
     alert_count = 0
     
-    # 각 티커에 대해 체크하고 즉시 알림 전송
-    for idx, ticker in enumerate(tickers_to_check, 1):
-        try:
-            df = get_data_and_indicators(ticker)
-            if df is None:
-                # 데이터를 가져올 수 없는 경우 조용히 건너뜀 (이미 get_data_and_indicators에서 로그됨)
-                continue
-
-            today = df.iloc[-1]
-            current_date = df.index[-1]
-            current_date_str = current_date.strftime('%Y-%m-%d') if hasattr(current_date, 'strftime') else str(current_date)[:10]
-            
-            cond_mfi = today['MFI'] < 35
-            cond_rsi = today['RSI'] < 35
-            cond_bb = check_bollinger_touch(df)
-            
-            all_conditions_met = cond_mfi and cond_rsi and cond_bb
-            
-            kst = pytz.timezone('Asia/Seoul')
-            now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
-            
-            status_icon = "✅" if all_conditions_met else "❌"
-            logging.info(
-                f"[{now_kst}] {status_icon} {ticker} | "
-                f"Date: {current_date_str} | "
-                f"Price: {today['Close']:.2f} | "
-                f"RSI: {today['RSI']:.2f} {'✓' if cond_rsi else '✗'} | "
-                f"MFI: {today['MFI']:.2f} {'✓' if cond_mfi else '✗'} | "
-                f"BB: {'✓' if cond_bb else '✗'} "
-                f"(Lower: {today['BB_Lower']:.2f})"
-            )
-            
-            if all_conditions_met:
-                # 즉시 알림 전송 (이미 필터링되어 오늘 알람을 보낸 티커는 체크하지 않음)
-                try:
-                    alert_count += 1
-                    logging.info(f"📤 {ticker}: 알림 전송 시작 ({alert_count}번째)")
-                    
-                    msg = (
-                        f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
-                        f"**조건 확인:**\n"
-                        f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
-                        f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
-                        f"✅ 볼린저 밴드: 하단 터치\n"
-                        f"   - 현재가: `{today['Close']:.2f}`\n"
-                        f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
-                        f"📊 차트를 확인하세요!"
-                    )
-                    
-                    chart_buf = draw_chart(df, ticker)
-                    if chart_buf:
-                        file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
-                        await channel.send(content=msg, file=file)
-                    else:
-                        await channel.send(content=msg)
-                    
-                    # 오늘 날짜로 알람 날짜 기록 (다음 사이클부터 제외됨)
-                    last_alert_dates[ticker] = today_str
-                    logging.info(f"✅ {ticker}: 알림 전송 완료 ({alert_count}번째) - 오늘은 더 이상 체크 안 함")
-                    
-                    # Discord 메시지 전송 간격 제한 (10초) - 다음 티커 체크 전 대기
-                    if alert_count > 0 and idx < len(tickers_to_check):
-                        logging.info(f"⏱️ Discord 메시지 간격 유지: {DISCORD_MESSAGE_INTERVAL}초 대기")
-                        await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
-                        
-                except Exception as e:
-                    logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
-
-        except Exception as e:
-            logging.error(f"{ticker} 체크 중 오류 발생: {e}", exc_info=True)
+    # 병렬로 모든 티커 데이터 다운로드 및 분석
+    logging.info(f"🚀 병렬 처리 시작: {PARALLEL_WORKERS}개 워커로 동시 다운로드")
+    
+    # ThreadPoolExecutor를 사용한 병렬 다운로드
+    loop = asyncio.get_event_loop()
+    ticker_results = []
+    
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+        # 모든 티커에 대해 병렬로 데이터 다운로드 및 분석
+        futures = [loop.run_in_executor(executor, analyze_ticker, ticker) for ticker in tickers_to_check]
         
-        # 진행 상황 로그 (100개마다)
-        if idx % 100 == 0:
-            logging.info(f"진행 중... {idx}/{len(tickers_to_check)} 완료, 알림 전송: {alert_count}개")
+        # 진행 상황 추적
+        completed = 0
+        for future in asyncio.as_completed(futures):
+            try:
+                result = await future
+                if result:
+                    ticker_results.append(result)
+                
+                completed += 1
+                # 진행 상황 로그 (10%마다)
+                if completed % max(1, len(tickers_to_check) // 10) == 0:
+                    progress = (completed / len(tickers_to_check)) * 100
+                    logging.info(f"⏳ 다운로드 진행: {completed}/{len(tickers_to_check)} ({progress:.1f}%)")
+            except Exception as e:
+                logging.error(f"병렬 처리 중 오류: {e}")
+                completed += 1
+    
+    # 다운로드 완료 시간 기록
+    download_time = time_module.time() - start_time
+    logging.info(f"✅ 데이터 다운로드 완료: {len(ticker_results)}개 성공, {len(tickers_to_check) - len(ticker_results)}개 실패 (소요 시간: {download_time:.1f}초)")
+    
+    # 조건을 만족하는 티커만 필터링
+    alerted_tickers_list = [r for r in ticker_results if r['alert']]
+    
+    if alerted_tickers_list:
+        logging.info(f"📢 알림 전송 대상: {len(alerted_tickers_list)}개 티커")
+        
+        # 알림 전송 (순차적으로, Discord API 제한 준수)
+        for idx, result in enumerate(alerted_tickers_list, 1):
+            try:
+                ticker = result['ticker']
+                df = result['df']
+                today = result['today']
+                now_kst = result['now_kst']
+                
+                alert_count += 1
+                logging.info(f"📤 {ticker}: 알림 전송 시작 ({alert_count}/{len(alerted_tickers_list)})")
+                
+                msg = (
+                    f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
+                    f"**조건 확인:**\n"
+                    f"✅ RSI(14): `{today['RSI']:.2f}` (< 35)\n"
+                    f"✅ MFI(14): `{today['MFI']:.2f}` (< 35)\n"
+                    f"✅ 볼린저 밴드: 하단 터치\n"
+                    f"   - 현재가: `{today['Close']:.2f}`\n"
+                    f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
+                    f"📊 차트를 확인하세요!"
+                )
+                
+                chart_buf = draw_chart(df, ticker)
+                if chart_buf:
+                    file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
+                    await channel.send(content=msg, file=file)
+                else:
+                    await channel.send(content=msg)
+                
+                # 오늘 날짜로 알람 날짜 기록
+                last_alert_dates[ticker] = today_str
+                logging.info(f"✅ {ticker}: 알림 전송 완료 ({alert_count}/{len(alerted_tickers_list)})")
+                
+                # Discord 메시지 전송 간격 제한
+                if idx < len(alerted_tickers_list):
+                    await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
+                    
+            except Exception as e:
+                logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
     
     # 알람 날짜 정보 저장
     if alert_count > 0:
