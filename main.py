@@ -284,13 +284,20 @@ def get_data_and_indicators(ticker):
         
         latest = df.iloc[-1]
         if pd.isna(latest['RSI']) or pd.isna(latest['MFI']) or pd.isna(latest['BB_Lower']):
-            logging.warning("최신 데이터에 NaN 값 존재")
+            logging.debug(f"{ticker}: 최신 데이터에 NaN 값 존재")
             return None
         
         return df
         
     except Exception as e:
-        logging.error(f"데이터 수신 오류: {e}")
+        # 타임아웃이나 네트워크 오류는 간단히 로그
+        error_msg = str(e).lower()
+        if 'timeout' in error_msg or 'timed out' in error_msg:
+            logging.warning(f"{ticker}: 타임아웃 (네트워크 지연)")
+        elif 'not found' in error_msg or 'delisted' in error_msg:
+            logging.debug(f"{ticker}: 티커를 찾을 수 없음")
+        else:
+            logging.warning(f"{ticker}: 데이터 수신 오류 - {type(e).__name__}")
         return None
 
 def check_bollinger_touch(df):
