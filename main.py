@@ -716,9 +716,6 @@ class StockBotGUI:
         self.stop_button = ttk.Button(button_frame, text="봇 중지", command=self.stop_bot, width=15, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
         
-        self.clear_button = ttk.Button(button_frame, text="티커 전체 삭제", command=self.clear_all_tickers, width=15)
-        self.clear_button.pack(side=tk.LEFT, padx=5)
-        
         # 상태 표시
         status_frame = ttk.LabelFrame(self.root, text="상태", padding="10")
         status_frame.pack(fill=tk.X, padx=10, pady=5)
