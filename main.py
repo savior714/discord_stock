@@ -196,7 +196,7 @@ def get_data_and_indicators(ticker):
     일봉 데이터와 보조지표 계산
     """
     try:
-        df = yf.download(ticker, period='6mo', interval='1d', progress=False)
+        df = yf.download(ticker, period='6mo', interval='1d', progress=False, auto_adjust=True)
         
         if df.empty or len(df) < 20:
             logging.warning(f"데이터 부족: {len(df)}개 행만 수신됨")
