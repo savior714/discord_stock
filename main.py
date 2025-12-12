@@ -82,6 +82,7 @@ bot_thread = None
 loop = None
 client = None
 TICKER_HISTORY_FILE = 'ticker_history.json'
+TICKER_SAVE_FILE = 'current_tickers.json'  # 현재 감시 중인 티커 저장 파일
 MAX_HISTORY = 20
 
 def load_ticker_history():
@@ -109,6 +110,30 @@ def save_ticker_history(tickers):
         logging.error(f"티커 히스토리 저장 오류: {e}")
         return False
 
+def load_current_tickers():
+    """현재 감시 중인 티커 목록 불러오기"""
+    if os.path.exists(TICKER_SAVE_FILE):
+        try:
+            with open(TICKER_SAVE_FILE, 'r', encoding='utf-8') as f:
+                tickers = json.load(f)
+                if isinstance(tickers, list):
+                    logging.info(f"저장된 티커 불러오기: {len(tickers)}개")
+                    return tickers
+        except Exception as e:
+            logging.error(f"티커 불러오기 오류: {e}")
+    return []
+
+def save_current_tickers():
+    """현재 감시 중인 티커 목록 저장"""
+    try:
+        with open(TICKER_SAVE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(TICKERS, f, ensure_ascii=False, indent=2)
+        logging.info(f"티커 저장 완료: {len(TICKERS)}개")
+        return True
+    except Exception as e:
+        logging.error(f"티커 저장 오류: {e}")
+        return False
+
 def add_tickers(new_tickers):
     """티커 리스트에 새로운 티커 추가"""
     global TICKERS
@@ -129,6 +154,9 @@ def add_tickers(new_tickers):
         if ticker not in history:
             history.insert(0, ticker)
     save_ticker_history(history)
+    
+    # 현재 티커 목록 저장
+    save_current_tickers()
     
     logging.info(f"📊 총 {added_count}개 티커 추가됨. 현재 감시 중인 티커: {len(TICKERS)}개")
     logging.info(f"📋 전체 티커 목록: {', '.join(TICKERS)}")
@@ -487,6 +515,8 @@ def run_bot():
 
 class StockBotGUI:
     def __init__(self, root):
+        global TICKERS
+        
         self.root = root
         self.root.title("Discord 주가 알람 봇 - 다중 티커 감시")
         self.root.geometry("900x750")
@@ -495,6 +525,12 @@ class StockBotGUI:
         # 스타일 설정
         style = ttk.Style()
         style.theme_use('clam')
+        
+        # 저장된 티커 불러오기
+        saved_tickers = load_current_tickers()
+        if saved_tickers:
+            TICKERS = saved_tickers
+            logging.info(f"💾 이전 세션의 티커 복원: {len(TICKERS)}개")
         
         # 티커 히스토리 로드
         self.ticker_history = load_ticker_history()
@@ -652,6 +688,7 @@ class StockBotGUI:
         result = messagebox.askyesno("확인", f"현재 등록된 {len(TICKERS)}개의 티커를 모두 삭제하시겠습니까?")
         if result:
             TICKERS.clear()
+            save_current_tickers()  # 빈 상태 저장
             self.ticker_label.config(text=f"감시 종목: 없음 (0개)")
             self.ticker_count_label.config(text=f"현재: 0/{MAX_TICKERS}개")
             self.add_log(f"[삭제] 모든 티커가 삭제되었습니다.")
