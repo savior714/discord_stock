@@ -280,6 +280,17 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         
         df = ticker_obj.history(period='6mo', interval='1d', auto_adjust=True)
         
+        # BRK.B 같은 특수 티커가 빈 데이터를 반환하면 하이픈 버전 시도
+        if df.empty and '.' in ticker:
+            if retry_count == 0:
+                logging.debug(f"🔄 {ticker}: 점(.) 포함 티커 실패, 하이픈(-) 버전 시도")
+            ticker_symbol_alt = ticker.replace('.', '-')
+            ticker_obj_alt = yf.Ticker(ticker_symbol_alt)
+            ticker_obj_alt._session = session
+            df = ticker_obj_alt.history(period='6mo', interval='1d', auto_adjust=True)
+            if not df.empty:
+                logging.info(f"✅ {ticker}: 하이픈 버전({ticker_symbol_alt})으로 성공")
+        
         if df.empty:
             # 빈 데이터프레임 - 티커가 존재하지 않거나 상장폐지
             if retry_count < max_retries:
@@ -798,6 +809,21 @@ class StockBotGUI:
         ticker_scroll_frame = ttk.Frame(ticker_list_frame)
         ticker_scroll_frame.pack(fill=tk.BOTH, expand=True)
         
+        # 검색 프레임
+        search_frame = ttk.Frame(ticker_list_frame)
+        search_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(search_frame, text="🔍 검색:", font=('맑은 고딕', 9)).pack(side=tk.LEFT, padx=5)
+        self.search_entry = ttk.Entry(search_frame, width=30, font=('맑은 고딕', 9))
+        self.search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry.bind('<KeyRelease>', self.on_search_changed)
+        
+        ttk.Button(search_frame, text="검색 초기화", 
+                  command=self.clear_search, width=12).pack(side=tk.LEFT, padx=5)
+        
+        self.search_result_label = ttk.Label(search_frame, text="", font=('맑은 고딕', 9), foreground='gray')
+        self.search_result_label.pack(side=tk.LEFT, padx=5)
+        
         # 스크롤바
         ticker_scrollbar = ttk.Scrollbar(ticker_scroll_frame)
         ticker_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -875,16 +901,47 @@ class StockBotGUI:
         
         self.root.after(100, self.process_log_queue)
     
-    def refresh_ticker_list(self):
-        """티커 목록 테이블 새로고침"""
+    def refresh_ticker_list(self, filter_text=''):
+        """티커 목록 테이블 새로고침 (검색 필터 지원)"""
         # 기존 항목 삭제
         for item in self.ticker_tree.get_children():
             self.ticker_tree.delete(item)
         
+        # 검색 필터 적용
+        filter_text = filter_text.strip().upper()
+        filtered_tickers = []
+        
+        if filter_text:
+            # 검색어가 있으면 필터링
+            for ticker in TICKERS:
+                if filter_text in ticker.upper():
+                    filtered_tickers.append(ticker)
+        else:
+            # 검색어가 없으면 전체 표시
+            filtered_tickers = TICKERS
+        
         # 티커 목록 추가
-        for idx, ticker in enumerate(TICKERS, 1):
+        for idx, ticker in enumerate(filtered_tickers, 1):
             last_alert = last_alert_dates.get(ticker, '없음')
             self.ticker_tree.insert('', tk.END, values=(idx, ticker, last_alert))
+        
+        # 검색 결과 표시
+        if filter_text:
+            self.search_result_label.config(
+                text=f"검색 결과: {len(filtered_tickers)}개 / 전체 {len(TICKERS)}개"
+            )
+        else:
+            self.search_result_label.config(text=f"전체: {len(TICKERS)}개")
+    
+    def on_search_changed(self, event=None):
+        """검색어 변경 시 호출"""
+        search_text = self.search_entry.get()
+        self.refresh_ticker_list(search_text)
+    
+    def clear_search(self):
+        """검색 초기화"""
+        self.search_entry.delete(0, tk.END)
+        self.refresh_ticker_list()
     
     def delete_selected_ticker(self):
         """선택한 티커 삭제"""

@@ -257,7 +257,6 @@
   "FAST",
   "QBTS",
   "ITW",
-  "AGNS",
   "ASTS",
   "DELL",
   "STX",
@@ -340,7 +339,6 @@
   "GEV",
   "QUAL",
   "SPHQ",
-  "SWELL",
   "EBAY",
   "SCHW",
   "RDDT",
@@ -357,5 +355,7 @@
   "ARKW",
   "ORCL",
   "IBKR",
-  "CRDO"
+  "CRDO",
+  "AGNC",
+  "WELL"
 ]
