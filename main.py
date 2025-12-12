@@ -262,6 +262,9 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         retry_count: 현재 재시도 횟수
         max_retries: 최대 재시도 횟수
     """
+    # 세션 리소스 누수 방지를 위한 변수
+    session = None
+    
     try:
         # FutureWarning 및 yfinance 경고 억제
         import warnings
@@ -378,6 +381,14 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         else:
             logging.warning(f"❌ {ticker}: {error_type} - {str(e)[:100]}")
         return None
+    
+    finally:
+        # 세션 리소스 정리 (중요: 파일 디스크립터 누수 방지)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass  # 세션 종료 실패는 무시
 
 def check_bollinger_touch(df):
     """
