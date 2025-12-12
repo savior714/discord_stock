@@ -632,7 +632,7 @@ class StockBotGUI:
         
     def add_tickers_only(self):
         """티커만 추가 (봇 실행 중에도 가능)"""
-        global TICKERS, last_alert_dates
+        global TICKERS
         
         # 티커 확인
         ticker_input = self.ticker_entry.get().strip().upper()
@@ -656,18 +656,6 @@ class StockBotGUI:
         # 티커 추가
         add_tickers(new_tickers)
         
-        # 새로 추가된 티커의 알람 날짜를 오늘로 설정 (중복 알람 방지)
-        from datetime import datetime
-        import pytz
-        kst = pytz.timezone('Asia/Seoul')
-        today_str = datetime.now(kst).strftime('%Y-%m-%d')
-        
-        for ticker in new_tickers:
-            if ticker not in last_alert_dates:
-                # 오늘 날짜로 설정하여 이미 알람을 보낸 것처럼 처리
-                last_alert_dates[ticker] = today_str
-                logging.info(f"🔒 {ticker}: 중복 알람 방지 설정 (오늘 날짜: {today_str})")
-        
         # UI 업데이트
         ticker_preview = ', '.join(TICKERS[:10]) + ("..." if len(TICKERS) > 10 else "") if TICKERS else "없음"
         self.ticker_label.config(text=f"감시 종목: {ticker_preview} ({len(TICKERS)}개)")
@@ -679,7 +667,7 @@ class StockBotGUI:
         if bot_running:
             self.add_log(f"[추가] 티커 추가 완료 (봇 실행 중): {', '.join(new_tickers)}")
             self.add_log(f"[안내] 다음 체크 주기부터 새 티커가 감시됩니다.")
-            self.add_log(f"[안내] 중복 알람 방지: 오늘은 알람을 보내지 않습니다.")
+            self.add_log(f"[안내] 조건 만족 시 즉시 알람이 전송됩니다.")
         else:
             self.add_log(f"[추가] 티커 추가 완료: {', '.join(new_tickers)}")
         
@@ -690,7 +678,7 @@ class StockBotGUI:
                 f"{len(new_tickers)}개 티커가 추가되었습니다.\n"
                 f"현재 총 {len(TICKERS)}개 감시 중\n\n"
                 f"※ 다음 체크 주기부터 감시됩니다.\n"
-                f"※ 오늘은 중복 알람을 방지합니다.")
+                f"※ 조건 만족 시 즉시 알람이 전송됩니다.")
         else:
             messagebox.showinfo("추가 완료", f"{len(new_tickers)}개 티커가 추가되었습니다.\n현재 총 {len(TICKERS)}개 감시 중")
     
