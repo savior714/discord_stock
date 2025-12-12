@@ -65,7 +65,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
+        logging.FileHandler('bot.log', mode='w', encoding='utf-8'),  # 'w' 모드로 이전 로그 초기화
         QueueHandler(log_queue)
     ]
 )
@@ -379,18 +379,30 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         # 재시도 가능한 오류인지 확인
         error_msg = str(e).lower()
         error_type = type(e).__name__
-        is_retryable = 'timeout' in error_msg or 'timed out' in error_msg or 'connection' in error_msg
+        
+        # SQLite 잠금 오류도 재시도 가능한 오류로 추가
+        is_retryable = (
+            'timeout' in error_msg or 
+            'timed out' in error_msg or 
+            'connection' in error_msg or
+            'database is locked' in error_msg or
+            error_type == 'OperationalError'
+        )
         
         # 재시도 가능하고 최대 재시도 횟수에 도달하지 않은 경우
         if is_retryable and retry_count < max_retries:
+            # 데이터베이스 잠금 오류인 경우 더 긴 대기 시간
+            wait_time = 1.0 if 'database is locked' in error_msg or error_type == 'OperationalError' else 0.5
             logging.debug(f"🔄 {ticker}: 재시도 {retry_count + 1}/{max_retries} (이유: {error_type})")
             import time
-            time.sleep(0.5)  # 짧은 대기 후 재시도
+            time.sleep(wait_time)  # 대기 후 재시도
             return get_data_and_indicators(ticker, retry_count + 1, max_retries)
         
         # 최종 실패 시 상세 로그
         if 'timeout' in error_msg or 'timed out' in error_msg:
             logging.warning(f"❌ {ticker}: 타임아웃 (재시도 {retry_count}회 실패) - {str(e)[:100]}")
+        elif 'database is locked' in error_msg or error_type == 'OperationalError':
+            logging.warning(f"❌ {ticker}: 데이터베이스 잠금 오류 (재시도 {retry_count}회 실패) - {str(e)[:100]}")
         elif 'not found' in error_msg or 'delisted' in error_msg:
             logging.warning(f"❌ {ticker}: 티커를 찾을 수 없음 (상장폐지 가능) - {str(e)[:100]}")
         elif 'index' in error_msg or 'key' in error_msg:
