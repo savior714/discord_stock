@@ -16,6 +16,8 @@ import queue
 import json
 from concurrent.futures import ThreadPoolExecutor
 import time as time_module
+import subprocess
+import urllib.request
 
 # tkinter import (필수)
 try:
@@ -46,6 +48,13 @@ CHECK_SECONDS = 600  # 10분 (600초)
 DISCORD_MESSAGE_INTERVAL = 10  # Discord 메시지 전송 간격 (초)
 MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
+
+# Self-update 설정
+CURRENT_VERSION = "2.0.0"  # 현재 버전
+GITHUB_REPO = "savior714/discord_stock"  # GitHub 저장소
+GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
+VERSION_URL = f"{GITHUB_RAW_BASE}/version.txt"
+CHANGELOG_URL = f"{GITHUB_RAW_BASE}/CHANGELOG.md"
 # ==========================================
 
 # 로깅 설정 (GUI용 핸들러 추가)
@@ -89,6 +98,68 @@ TICKER_HISTORY_FILE = 'ticker_history.json'
 TICKER_SAVE_FILE = 'current_tickers.json'  # 현재 감시 중인 티커 저장 파일
 ALERT_DATES_FILE = 'alert_dates.json'  # 알람 날짜 저장 파일
 MAX_HISTORY = 20
+
+def check_for_updates():
+    """
+    GitHub에서 새 버전 확인
+    
+    Returns:
+        tuple: (has_update, remote_version, changelog_content)
+    """
+    try:
+        # 원격 버전 확인
+        with urllib.request.urlopen(VERSION_URL, timeout=5) as response:
+            remote_version = response.read().decode('utf-8').strip()
+        
+        # 버전 비교
+        if remote_version != CURRENT_VERSION:
+            # 변경 이력 가져오기
+            try:
+                with urllib.request.urlopen(CHANGELOG_URL, timeout=5) as response:
+                    changelog = response.read().decode('utf-8')
+            except:
+                changelog = "변경 이력을 불러올 수 없습니다."
+            
+            return True, remote_version, changelog
+        
+        return False, CURRENT_VERSION, ""
+    
+    except Exception as e:
+        logging.debug(f"업데이트 확인 실패: {e}")
+        return False, CURRENT_VERSION, ""
+
+def perform_update():
+    """
+    Git pull을 통한 업데이트 수행
+    
+    Returns:
+        tuple: (success, message)
+    """
+    try:
+        # Git 저장소 확인
+        if not os.path.exists('.git'):
+            return False, "Git 저장소가 아닙니다. 수동으로 업데이트하세요."
+        
+        # Git pull 실행
+        result = subprocess.run(
+            ['git', 'pull', 'origin', 'main'],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        
+        if result.returncode == 0:
+            return True, f"업데이트 완료!\n\n{result.stdout}"
+        else:
+            return False, f"업데이트 실패:\n{result.stderr}"
+    
+    except FileNotFoundError:
+        return False, "Git이 설치되어 있지 않습니다. Git을 설치하거나 수동으로 업데이트하세요."
+    except subprocess.TimeoutExpired:
+        return False, "업데이트 시간 초과. 네트워크 연결을 확인하세요."
+    except Exception as e:
+        return False, f"업데이트 오류: {str(e)}"
 
 def load_ticker_history():
     """티커 히스토리 불러오기"""
@@ -865,6 +936,9 @@ class StockBotGUI:
         self.setup_ui()
         self.process_log_queue()
         
+        # 업데이트 확인 (UI 설정 후 비동기 실행)
+        self.root.after(1000, self.check_updates)
+        
     def setup_ui(self):
         """UI 구성"""
         # 상단 프레임 - 티커 입력 및 제어
@@ -1025,6 +1099,187 @@ class StockBotGUI:
             pass
         
         self.root.after(100, self.process_log_queue)
+    
+    def check_updates(self):
+        """업데이트 확인 (백그라운드 스레드에서 실행)"""
+        def check_thread():
+            has_update, remote_version, changelog = check_for_updates()
+            if has_update:
+                # UI 스레드에서 다이얼로그 표시
+                self.root.after(0, lambda: self.show_update_dialog(remote_version, changelog))
+        
+        # 백그라운드 스레드에서 체크
+        thread = threading.Thread(target=check_thread, daemon=True)
+        thread.start()
+    
+    def show_update_dialog(self, remote_version, changelog):
+        """업데이트 확인 다이얼로그 표시"""
+        # 변경 이력에서 최신 버전 부분만 추출
+        try:
+            lines = changelog.split('\n')
+            version_section = []
+            in_target_version = False
+            
+            for line in lines:
+                if line.startswith('## ') and remote_version in line:
+                    in_target_version = True
+                    version_section.append(line)
+                elif line.startswith('## ') and in_target_version:
+                    break
+                elif in_target_version:
+                    version_section.append(line)
+            
+            changelog_preview = '\n'.join(version_section[:15])  # 최대 15줄
+            if len(version_section) > 15:
+                changelog_preview += '\n...'
+        except:
+            changelog_preview = "변경 이력을 불러올 수 없습니다."
+        
+        # 다이얼로그 생성
+        dialog = tk.Toplevel(self.root)
+        dialog.title("업데이트 확인")
+        dialog.geometry("600x500")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # 중앙 배치
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (600 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        # 내용
+        content_frame = ttk.Frame(dialog, padding="20")
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 제목
+        title_label = ttk.Label(
+            content_frame, 
+            text=f"🆕 새로운 버전이 있습니다!",
+            font=('맑은 고딕', 14, 'bold')
+        )
+        title_label.pack(pady=(0, 10))
+        
+        # 버전 정보
+        version_frame = ttk.Frame(content_frame)
+        version_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Label(
+            version_frame,
+            text=f"현재 버전: {CURRENT_VERSION}",
+            font=('맑은 고딕', 10)
+        ).pack(side=tk.LEFT, padx=10)
+        
+        ttk.Label(
+            version_frame,
+            text=f"→",
+            font=('맑은 고딕', 10)
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(
+            version_frame,
+            text=f"최신 버전: {remote_version}",
+            font=('맑은 고딕', 10, 'bold'),
+            foreground='green'
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # 변경 이력
+        ttk.Label(
+            content_frame,
+            text="변경 이력:",
+            font=('맑은 고딕', 10, 'bold')
+        ).pack(anchor=tk.W, pady=(10, 5))
+        
+        changelog_text = scrolledtext.ScrolledText(
+            content_frame,
+            height=15,
+            font=('맑은 고딕', 9),
+            wrap=tk.WORD
+        )
+        changelog_text.pack(fill=tk.BOTH, expand=True)
+        changelog_text.insert(tk.END, changelog_preview)
+        changelog_text.config(state=tk.DISABLED)
+        
+        # 버튼
+        button_frame = ttk.Frame(content_frame)
+        button_frame.pack(pady=(15, 0))
+        
+        def update_now():
+            dialog.destroy()
+            self.perform_update_with_progress()
+        
+        def skip_update():
+            dialog.destroy()
+            self.add_log("")
+            self.add_log(f"[업데이트] 건너뛰기 (현재: {CURRENT_VERSION}, 최신: {remote_version})")
+            self.add_log("")
+        
+        ttk.Button(
+            button_frame,
+            text="지금 업데이트",
+            command=update_now,
+            width=15
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="나중에",
+            command=skip_update,
+            width=15
+        ).pack(side=tk.LEFT, padx=5)
+    
+    def perform_update_with_progress(self):
+        """업데이트 실행 (진행 상황 표시)"""
+        self.add_log("")
+        self.add_log("=" * 60)
+        self.add_log("[업데이트] 업데이트를 시작합니다...")
+        self.add_log("=" * 60)
+        
+        def update_thread():
+            success, message = perform_update()
+            
+            # UI 스레드에서 결과 표시
+            self.root.after(0, lambda: self.show_update_result(success, message))
+        
+        # 백그라운드 스레드에서 업데이트 실행
+        thread = threading.Thread(target=update_thread, daemon=True)
+        thread.start()
+    
+    def show_update_result(self, success, message):
+        """업데이트 결과 표시"""
+        self.add_log("")
+        if success:
+            self.add_log("✅ 업데이트 완료!")
+            self.add_log("")
+            for line in message.split('\n'):
+                if line.strip():
+                    self.add_log(f"   {line}")
+            self.add_log("")
+            self.add_log("⚠️ 프로그램을 재시작하여 업데이트를 적용하세요.")
+            self.add_log("=" * 60)
+            
+            # 재시작 확인 다이얼로그
+            result = messagebox.askyesno(
+                "업데이트 완료",
+                "업데이트가 완료되었습니다.\n\n프로그램을 재시작하시겠습니까?",
+                icon='info'
+            )
+            
+            if result:
+                self.root.destroy()
+        else:
+            self.add_log("❌ 업데이트 실패!")
+            self.add_log("")
+            for line in message.split('\n'):
+                if line.strip():
+                    self.add_log(f"   {line}")
+            self.add_log("=" * 60)
+            
+            messagebox.showerror(
+                "업데이트 실패",
+                f"업데이트에 실패했습니다.\n\n{message}"
+            )
     
     def update_status(self, status_type, message):
         """
