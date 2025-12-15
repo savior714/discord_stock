@@ -51,7 +51,7 @@ MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
 
 # Self-update 설정
-CURRENT_VERSION = "2.1.0"  # 현재 버전
+CURRENT_VERSION = "2.1.1"  # 현재 버전
 GITHUB_REPO = "savior714/discord_stock"  # GitHub 저장소
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
 VERSION_URL = f"{GITHUB_RAW_BASE}/version.txt"
