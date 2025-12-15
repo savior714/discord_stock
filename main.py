@@ -667,7 +667,13 @@ async def check_price():
     """
     주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송 (대규모 다중 티커 지원)
     """
-    global last_alert_dates, TICKERS
+    global last_alert_dates, TICKERS, bot_running
+    
+    # 봇이 중지되었으면 즉시 종료
+    if not bot_running:
+        logging.info("🛑 봇 중지 요청 감지. 체크 루프를 종료합니다.")
+        check_price.cancel()
+        return
     
     if not is_active_time():
         kst = pytz.timezone('Asia/Seoul')
@@ -1685,34 +1691,46 @@ class StockBotGUI:
         
     def stop_bot(self):
         """봇 중지"""
-        global bot_running, loop
+        global bot_running, loop, client
         
         if not bot_running:
             return
         
-        bot_running = False
+        self.add_log("")
+        self.add_log("[중지] 봇을 중지합니다...")
         
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
-        # 티커 추가는 항상 활성화되어 있으므로 상태 변경 불필요
-        # self.ticker_entry.config(state=tk.NORMAL)
-        # self.add_ticker_button.config(state=tk.NORMAL)
+        # 봇 실행 플래그를 먼저 False로 설정
+        bot_running = False
         
         # 상태 표시: 회색 (중지됨)
         self.update_status('stopped', '중지됨')
         
-        self.add_log("")
-        self.add_log("[중지] 봇을 중지합니다...")
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
         
         # 봇 종료
         try:
-            if loop and not loop.is_closed():
-                asyncio.run_coroutine_threadsafe(client.close(), loop)
-            check_price.cancel()
+            # check_price 태스크 취소
+            if check_price.is_running():
+                check_price.cancel()
+                logging.info("🛑 check_price 태스크 취소됨")
+            
+            # Discord client 종료
+            if client and loop and not loop.is_closed():
+                logging.info("🛑 Discord client 종료 중...")
+                # 이벤트 루프가 실행 중인 스레드에서 종료
+                future = asyncio.run_coroutine_threadsafe(client.close(), loop)
+                try:
+                    # 최대 5초 대기
+                    future.result(timeout=5)
+                    logging.info("✅ Discord client 종료 완료")
+                except Exception as e:
+                    logging.warning(f"⚠️ Discord client 종료 중 오류: {e}")
         except Exception as e:
-            logging.error(f"봇 중지 오류: {e}")
+            logging.error(f"봇 중지 오류: {e}", exc_info=True)
         
-        self.add_log("[안내] 봇을 다시 시작하려면 프로그램을 재시작하세요.")
+        self.add_log("[안내] 봇이 중지되었습니다.")
+        self.add_log("[안내] 봇을 다시 시작하려면 '봇 시작' 버튼을 클릭하세요.")
 
 if __name__ == '__main__':
     try:
