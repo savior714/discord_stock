@@ -51,7 +51,7 @@ MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
 
 # Self-update 설정
-CURRENT_VERSION = "2.1.3"  # 현재 버전
+CURRENT_VERSION = "2.1.4"  # 현재 버전
 GITHUB_REPO = "savior714/discord_stock"  # GitHub 저장소
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
 VERSION_URL = f"{GITHUB_RAW_BASE}/version.txt"
@@ -847,6 +847,8 @@ async def check_price():
                 else:
                     await channel_bb_only.send(content=msg)
                 
+                # 오늘 장일 날짜로 알람 날짜 기록 (BB 전용 알림도 중복 방지)
+                last_alert_dates[ticker] = trading_day_str
                 logging.info(f"✅ [BB전용] {ticker}: 알림 전송 완료 ({idx}/{len(alerted_tickers_bb_only)})")
                 
                 # Discord 메시지 전송 간격 제한
@@ -858,8 +860,8 @@ async def check_price():
     elif alerted_tickers_bb_only and not channel_bb_only:
         logging.warning(f"⚠️ BB 전용 채널이 설정되지 않아 {len(alerted_tickers_bb_only)}개 알림을 건너뜁니다.")
     
-    # 알람 날짜 정보 저장 (메인 채널 알림만 날짜 기록)
-    if alert_count > 0:
+    # 알람 날짜 정보 저장 (메인 채널 및 BB 전용 채널 알림 모두 날짜 기록)
+    if alert_count > 0 or len(alerted_tickers_bb_only) > 0:
         save_alert_dates()
         logging.info(f"=== 알림 전송 완료: 메인 {len(alerted_tickers_main)}개, BB전용 {len(alerted_tickers_bb_only)}개 (총 {alert_count + len(alerted_tickers_bb_only)}개) ===")
         
