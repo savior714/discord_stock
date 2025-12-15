@@ -51,7 +51,7 @@ MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
 
 # Self-update 설정
-CURRENT_VERSION = "2.1.2"  # 현재 버전
+CURRENT_VERSION = "2.1.3"  # 현재 버전
 GITHUB_REPO = "savior714/discord_stock"  # GitHub 저장소
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
 VERSION_URL = f"{GITHUB_RAW_BASE}/version.txt"
@@ -1472,6 +1472,10 @@ class StockBotGUI:
         
         if not TICKERS:
             messagebox.showinfo("알림", "등록된 티커가 없습니다.")
+            return
+        
+        if bot_running:
+            messagebox.showwarning("경고", "봇 실행 중에는 알람 날짜를 초기화할 수 없습니다.\n먼저 봇을 중지해주세요.")
             return
         
         # 확인 메시지
