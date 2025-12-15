@@ -51,7 +51,7 @@ MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
 
 # Self-update 설정
-CURRENT_VERSION = "2.1.1"  # 현재 버전
+CURRENT_VERSION = "2.1.2"  # 현재 버전
 GITHUB_REPO = "savior714/discord_stock"  # GitHub 저장소
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
 VERSION_URL = f"{GITHUB_RAW_BASE}/version.txt"
@@ -1122,6 +1122,9 @@ class StockBotGUI:
         ttk.Button(ticker_button_frame, text="선택한 티커 삭제", 
                   command=self.delete_selected_ticker, width=20).pack(side=tk.LEFT, padx=5)
         
+        ttk.Button(ticker_button_frame, text="알람 날짜 초기화", 
+                  command=self.reset_alert_dates, width=20).pack(side=tk.LEFT, padx=5)
+        
         # 초기 티커 목록 표시
         self.refresh_ticker_list()
         
@@ -1462,6 +1465,41 @@ class StockBotGUI:
                     self.ticker_tree.heading('티커', text='티커')
                 elif col == '마지막 알람':
                     self.ticker_tree.heading('마지막 알람', text='마지막 알람 날짜')
+    
+    def reset_alert_dates(self):
+        """알람 날짜 초기화 (모든 티커의 알람 날짜 삭제)"""
+        global last_alert_dates
+        
+        if not TICKERS:
+            messagebox.showinfo("알림", "등록된 티커가 없습니다.")
+            return
+        
+        # 확인 메시지
+        result = messagebox.askyesno("확인", 
+            f"모든 티커의 알람 날짜를 초기화하시겠습니까?\n\n"
+            f"초기화 후 다음 체크 시 모든 조건 만족 티커에 대해\n"
+            f"알림이 다시 전송됩니다.\n\n"
+            f"(총 {len(TICKERS)}개 티커)")
+        
+        if result:
+            # 알람 날짜 전체 초기화
+            last_alert_dates.clear()
+            save_alert_dates()
+            
+            # 티커 목록 새로고침
+            self.refresh_ticker_list()
+            
+            # 로그 출력
+            logging.info("=" * 60)
+            logging.info("🔄 알람 날짜 초기화 완료")
+            logging.info(f"   - 초기화된 티커 수: {len(TICKERS)}개")
+            logging.info(f"   - 다음 체크 시 모든 조건 만족 티커에 알림 전송됨")
+            logging.info("=" * 60)
+            
+            messagebox.showinfo("완료", 
+                f"알람 날짜가 초기화되었습니다.\n\n"
+                f"다음 체크 시 모든 조건 만족 티커에 대해\n"
+                f"알림이 전송됩니다.")
     
     def delete_selected_ticker(self):
         """선택한 티커 삭제"""
