@@ -1,0 +1,21 @@
+# Git attributes for consistent line endings and encoding
+# Ensure all text files use UTF-8 encoding
+
+# Text files
+*.py text eol=lf encoding=UTF-8
+*.md text eol=lf encoding=UTF-8
+*.txt text eol=lf encoding=UTF-8
+*.json text eol=lf encoding=UTF-8
+*.env text eol=lf encoding=UTF-8
+*.bat text eol=crlf encoding=UTF-8
+
+# Ensure line endings are normalized
+* text=auto
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
