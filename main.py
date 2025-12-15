@@ -43,14 +43,15 @@ load_dotenv()
 
 # ================= 설정값 =================
 TOKEN = os.getenv('DISCORD_TOKEN', '')
-CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID', '')
+CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID', '')  # 메인 채널 (RSI + MFI + BB 모두 만족)
+CHANNEL_ID_BB_ONLY = os.getenv('DISCORD_CHANNEL_ID_BB_ONLY', '')  # BB 전용 채널 (BB만 만족)
 CHECK_SECONDS = 600  # 10분 (600초)
 DISCORD_MESSAGE_INTERVAL = 10  # Discord 메시지 전송 간격 (초)
 MAX_TICKERS = 500  # 최대 감시 가능 티커 수
 PARALLEL_WORKERS = 10  # 병렬 처리 워커 수 (동시에 다운로드할 티커 수)
 
 # Self-update 설정
-CURRENT_VERSION = "2.0.1"  # 현재 버전
+CURRENT_VERSION = "2.1.0"  # 현재 버전
 GITHUB_REPO = "savior714/discord_stock"  # GitHub 저장소
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
 VERSION_URL = f"{GITHUB_RAW_BASE}/version.txt"
@@ -554,11 +555,20 @@ def analyze_ticker(ticker):
         cond_bb = check_bollinger_touch(df)
         
         all_conditions_met = cond_mfi and cond_rsi and cond_bb
+        bb_only_met = cond_bb and not all_conditions_met  # BB만 만족 (RSI/MFI는 불만족)
         
         kst = pytz.timezone('Asia/Seoul')
         now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
         
-        status_icon = "✅" if all_conditions_met else "❌"
+        # 메인 알림 (3가지 모두 만족)
+        if all_conditions_met:
+            status_icon = "✅ [메인]"
+        # BB 전용 알림 (BB만 만족)
+        elif bb_only_met:
+            status_icon = "🔵 [BB전용]"
+        else:
+            status_icon = "❌"
+        
         logging.info(
             f"[{now_kst}] {status_icon} {ticker} | "
             f"Date: {current_date_str} | "
@@ -574,7 +584,8 @@ def analyze_ticker(ticker):
             'df': df,
             'today': today,
             'now_kst': now_kst,
-            'alert': all_conditions_met
+            'alert': all_conditions_met,  # 메인 채널 알림 (3가지 모두 만족)
+            'alert_bb_only': bb_only_met  # BB 전용 채널 알림 (BB만 만족)
         }
     except Exception as e:
         logging.error(f"{ticker} 분석 중 오류: {e}")
@@ -664,10 +675,20 @@ async def check_price():
         logging.debug(f"[{now_kst}] 감시 시간이 아닙니다. (10:00 ~ 04:00 KST)")
         return
 
-    channel = client.get_channel(int(CHANNEL_ID))
-    if not channel:
-        logging.error(f"채널을 찾을 수 없습니다: {CHANNEL_ID}")
+    # 메인 채널 (RSI + MFI + BB 모두 만족)
+    channel_main = client.get_channel(int(CHANNEL_ID))
+    if not channel_main:
+        logging.error(f"메인 채널을 찾을 수 없습니다: {CHANNEL_ID}")
         return
+    
+    # BB 전용 채널 (BB만 만족)
+    channel_bb_only = None
+    if CHANNEL_ID_BB_ONLY:
+        channel_bb_only = client.get_channel(int(CHANNEL_ID_BB_ONLY))
+        if channel_bb_only:
+            logging.info(f"✅ BB 전용 채널 연결됨: {CHANNEL_ID_BB_ONLY}")
+        else:
+            logging.warning(f"⚠️ BB 전용 채널을 찾을 수 없습니다: {CHANNEL_ID_BB_ONLY}")
 
     # 장일 기준 날짜 확인 (오전 10시 이후부터 새로운 장일)
     trading_day_str = get_trading_day()
@@ -743,14 +764,20 @@ async def check_price():
         failed_preview = ', '.join(failed_tickers[:10]) + ('...' if len(failed_tickers) > 10 else '')
         logging.warning(f"⚠️ 실패한 티커 ({fail_count}개): {failed_preview}")
     
-    # 조건을 만족하는 티커만 필터링
-    alerted_tickers_list = [r for r in ticker_results if r['alert']]
+    # 조건을 만족하는 티커 필터링
+    alerted_tickers_main = [r for r in ticker_results if r['alert']]  # 메인: RSI + MFI + BB 모두
+    alerted_tickers_bb_only = [r for r in ticker_results if r.get('alert_bb_only', False)]  # BB 전용: BB만
     
-    if alerted_tickers_list:
-        logging.info(f"📢 알림 전송 대상: {len(alerted_tickers_list)}개 티커")
+    total_alerts = len(alerted_tickers_main) + len(alerted_tickers_bb_only)
+    
+    if total_alerts > 0:
+        logging.info(f"📢 알림 전송 대상: 메인 {len(alerted_tickers_main)}개, BB전용 {len(alerted_tickers_bb_only)}개")
+    
+    # 1. 메인 채널 알림 (RSI + MFI + BB 모두 만족)
+    if alerted_tickers_main:
+        logging.info(f"📢 [메인 채널] 알림 전송 시작: {len(alerted_tickers_main)}개 티커")
         
-        # 알림 전송 (순차적으로, Discord API 제한 준수)
-        for idx, result in enumerate(alerted_tickers_list, 1):
+        for idx, result in enumerate(alerted_tickers_main, 1):
             try:
                 ticker = result['ticker']
                 df = result['df']
@@ -758,7 +785,7 @@ async def check_price():
                 now_kst = result['now_kst']
                 
                 alert_count += 1
-                logging.info(f"📤 {ticker}: 알림 전송 시작 ({alert_count}/{len(alerted_tickers_list)})")
+                logging.info(f"📤 [메인] {ticker}: 알림 전송 시작 ({idx}/{len(alerted_tickers_main)})")
                 
                 msg = (
                     f"🚨 **{ticker} 매수 조건 포착!** ({now_kst})\n\n"
@@ -774,33 +801,75 @@ async def check_price():
                 chart_buf = draw_chart(df, ticker)
                 if chart_buf:
                     file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
-                    await channel.send(content=msg, file=file)
+                    await channel_main.send(content=msg, file=file)
                 else:
-                    await channel.send(content=msg)
+                    await channel_main.send(content=msg)
                 
                 # 오늘 장일 날짜로 알람 날짜 기록
                 last_alert_dates[ticker] = trading_day_str
-                logging.info(f"✅ {ticker}: 알림 전송 완료 ({alert_count}/{len(alerted_tickers_list)})")
+                logging.info(f"✅ [메인] {ticker}: 알림 전송 완료 ({idx}/{len(alerted_tickers_main)})")
                 
                 # Discord 메시지 전송 간격 제한
-                if idx < len(alerted_tickers_list):
+                if idx < len(alerted_tickers_main):
                     await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
                     
             except Exception as e:
-                logging.error(f"{ticker} 알림 전송 오류: {e}", exc_info=True)
+                logging.error(f"[메인] {ticker} 알림 전송 오류: {e}", exc_info=True)
     
-    # 알람 날짜 정보 저장
+    # 2. BB 전용 채널 알림 (BB만 만족)
+    if alerted_tickers_bb_only and channel_bb_only:
+        logging.info(f"📢 [BB 전용 채널] 알림 전송 시작: {len(alerted_tickers_bb_only)}개 티커")
+        
+        for idx, result in enumerate(alerted_tickers_bb_only, 1):
+            try:
+                ticker = result['ticker']
+                df = result['df']
+                today = result['today']
+                now_kst = result['now_kst']
+                
+                logging.info(f"📤 [BB전용] {ticker}: 알림 전송 시작 ({idx}/{len(alerted_tickers_bb_only)})")
+                
+                msg = (
+                    f"🔵 **{ticker} 볼린저 밴드 하단 터치!** ({now_kst})\n\n"
+                    f"**조건 확인:**\n"
+                    f"{'✅' if today['RSI'] < 35 else '❌'} RSI(14): `{today['RSI']:.2f}` (기준: < 35)\n"
+                    f"{'✅' if today['MFI'] < 35 else '❌'} MFI(14): `{today['MFI']:.2f}` (기준: < 35)\n"
+                    f"✅ 볼린저 밴드: 하단 터치\n"
+                    f"   - 현재가: `{today['Close']:.2f}`\n"
+                    f"   - 하단 밴드: `{today['BB_Lower']:.2f}`\n\n"
+                    f"📊 차트를 확인하세요!"
+                )
+                
+                chart_buf = draw_chart(df, ticker)
+                if chart_buf:
+                    file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
+                    await channel_bb_only.send(content=msg, file=file)
+                else:
+                    await channel_bb_only.send(content=msg)
+                
+                logging.info(f"✅ [BB전용] {ticker}: 알림 전송 완료 ({idx}/{len(alerted_tickers_bb_only)})")
+                
+                # Discord 메시지 전송 간격 제한
+                if idx < len(alerted_tickers_bb_only):
+                    await asyncio.sleep(DISCORD_MESSAGE_INTERVAL)
+                    
+            except Exception as e:
+                logging.error(f"[BB전용] {ticker} 알림 전송 오류: {e}", exc_info=True)
+    elif alerted_tickers_bb_only and not channel_bb_only:
+        logging.warning(f"⚠️ BB 전용 채널이 설정되지 않아 {len(alerted_tickers_bb_only)}개 알림을 건너뜁니다.")
+    
+    # 알람 날짜 정보 저장 (메인 채널 알림만 날짜 기록)
     if alert_count > 0:
         save_alert_dates()
-        logging.info(f"=== 알림 전송 완료: 총 {alert_count}개 전송됨 ===")
+        logging.info(f"=== 알림 전송 완료: 메인 {len(alerted_tickers_main)}개, BB전용 {len(alerted_tickers_bb_only)}개 (총 {alert_count + len(alerted_tickers_bb_only)}개) ===")
         
-        # 알람을 보낸 티커를 리스트 상단으로 이동
+        # 메인 채널 알람을 보낸 티커를 리스트 상단으로 이동
         alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) == trading_day_str]
         not_alerted_tickers = [t for t in TICKERS if last_alert_dates.get(t) != trading_day_str]
         TICKERS[:] = alerted_tickers + not_alerted_tickers
         save_current_tickers()
         
-        logging.info(f"📌 티커 목록 재정렬: 알람 전송된 {len(alerted_tickers)}개 티커를 상단으로 이동")
+        logging.info(f"📌 티커 목록 재정렬: 메인 알람 전송된 {len(alerted_tickers)}개 티커를 상단으로 이동")
         
         # GUI 업데이트 (메인 스레드에서 실행)
         if gui_instance:
@@ -808,10 +877,12 @@ async def check_price():
                 gui_instance.root.after(0, gui_instance.refresh_ticker_list)
             except:
                 pass
+    elif len(alerted_tickers_bb_only) > 0:
+        logging.info(f"=== BB전용 알림만 전송: {len(alerted_tickers_bb_only)}개 ===")
     else:
         logging.info("=== 조건 만족 종목 없음 ===")
     
-    logging.info(f"=== 감시 완료: {len(tickers_to_check)}개 체크, {len(skipped_today)}개 건너뜀 (오늘 알람 전송됨) ===")
+    logging.info(f"=== 감시 완료: {len(tickers_to_check)}개 체크, {len(skipped_today)}개 건너뜀 (오늘 메인 알람 전송됨) ===")
 
 @check_price.error
 async def check_price_error(error):

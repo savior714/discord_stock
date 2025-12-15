@@ -1,6 +1,11 @@
 # Discord Bot 설정
 DISCORD_TOKEN=여기에_디스코드_봇_토큰_입력
+
+# 메인 채널 (RSI + MFI + 볼린저 밴드 모두 만족)
 DISCORD_CHANNEL_ID=123456789012345678
+
+# 볼린저 밴드 전용 채널 (볼린저 밴드 하단만 만족) - 선택사항
+DISCORD_CHANNEL_ID_BB_ONLY=123456789012345679
 
 # 주식 종목 코드 (예: AAPL, TSLA, 005930.KS 등)
 TICKER=AAPL
