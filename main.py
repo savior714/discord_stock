@@ -370,6 +370,12 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         retry_count: 현재 재시도 횟수
         max_retries: 최대 재시도 횟수
     """
+    global bot_running
+    
+    # 봇이 중지되었으면 즉시 중단
+    if not bot_running:
+        return None
+    
     # 세션 리소스 누수 방지를 위한 변수
     session = None
     
@@ -410,7 +416,15 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
         session.mount("https://", adapter)
         ticker_obj._session = session
         
+        # 봇이 중지되었는지 확인 (데이터 다운로드 전)
+        if not bot_running:
+            return None
+        
         df = ticker_obj.history(period='6mo', interval='1d', auto_adjust=True)
+        
+        # 봇이 중지되었는지 확인 (데이터 다운로드 후)
+        if not bot_running:
+            return None
         
         # BRK.B 같은 특수 티커가 빈 데이터를 반환하면 하이픈 버전 시도
         if df.empty and '.' in ticker:
@@ -458,14 +472,26 @@ def get_data_and_indicators(ticker, retry_count=0, max_retries=2):
                 logging.debug(f"{ticker}: NaN 제거 후 데이터 부족")
             return None
         
+        # 봇이 중지되었는지 확인 (보조지표 계산 중)
+        if not bot_running:
+            return None
+        
         df['RSI'] = calculate_rsi_wilders(df['Close'], period=14)
         df['MFI'] = calculate_mfi(df, period=14)
+        
+        # 봇이 중지되었는지 확인 (볼린저 밴드 계산 전)
+        if not bot_running:
+            return None
         
         ma20 = df['Close'].rolling(20).mean()
         std = df['Close'].rolling(20).std()
         df['BB_Lower'] = ma20 - (std * 1)
         df['BB_Upper'] = ma20 + (std * 1)
         df['BB_Middle'] = ma20
+        
+        # 봇이 중지되었는지 확인 (최종 검증 전)
+        if not bot_running:
+            return None
         
         latest = df.iloc[-1]
         if pd.isna(latest['RSI']) or pd.isna(latest['MFI']) or pd.isna(latest['BB_Lower']):
@@ -541,9 +567,19 @@ def analyze_ticker(ticker):
     단일 티커 분석 (병렬 처리용)
     데이터 다운로드 및 조건 체크를 수행하고 결과 반환
     """
+    global bot_running
+    
+    # 봇이 중지되었으면 즉시 중단
+    if not bot_running:
+        return None
+    
     try:
         df = get_data_and_indicators(ticker)
         if df is None:
+            return None
+        
+        # 데이터 다운로드 후 다시 확인
+        if not bot_running:
             return None
 
         today = df.iloc[-1]
@@ -667,7 +703,13 @@ async def check_price():
     """
     주기적으로 주가와 보조지표를 확인하고 조건 만족 시 알람 전송 (대규모 다중 티커 지원)
     """
-    global last_alert_dates, TICKERS
+    global last_alert_dates, TICKERS, bot_running
+    
+    # 봇이 중지되었으면 즉시 종료
+    if not bot_running:
+        logging.info("🛑 봇 중지 요청 감지. 체크 루프를 종료합니다.")
+        check_price.cancel()
+        return
     
     if not is_active_time():
         kst = pytz.timezone('Asia/Seoul')
@@ -735,6 +777,15 @@ async def check_price():
         # 진행 상황 추적
         completed = 0
         for future in asyncio.as_completed(futures):
+            # 봇이 중지되었으면 즉시 중단
+            if not bot_running:
+                logging.info("🛑 봇 중지 요청 감지. 병렬 처리를 즉시 중단합니다.")
+                # 남은 작업 취소 시도
+                for f in futures:
+                    if not f.done():
+                        f.cancel()
+                break
+            
             try:
                 result = await future
                 if result:
@@ -748,6 +799,11 @@ async def check_price():
             except Exception as e:
                 logging.error(f"병렬 처리 중 오류: {e}")
                 completed += 1
+        
+        # 봇이 중지되었으면 결과 처리하지 않고 즉시 종료
+        if not bot_running:
+            logging.info("🛑 봇 중지로 인해 체크를 중단합니다.")
+            return
     
     # 다운로드 완료 시간 기록
     download_time = time_module.time() - start_time
@@ -764,6 +820,11 @@ async def check_price():
         failed_preview = ', '.join(failed_tickers[:10]) + ('...' if len(failed_tickers) > 10 else '')
         logging.warning(f"⚠️ 실패한 티커 ({fail_count}개): {failed_preview}")
     
+    # 봇이 중지되었는지 다시 확인
+    if not bot_running:
+        logging.info("🛑 봇 중지 요청 감지. 알림 전송을 중단합니다.")
+        return
+    
     # 조건을 만족하는 티커 필터링
     alerted_tickers_main = [r for r in ticker_results if r['alert']]  # 메인: RSI + MFI + BB 모두
     alerted_tickers_bb_only = [r for r in ticker_results if r.get('alert_bb_only', False)]  # BB 전용: BB만
@@ -778,6 +839,11 @@ async def check_price():
         logging.info(f"📢 [메인 채널] 알림 전송 시작: {len(alerted_tickers_main)}개 티커")
         
         for idx, result in enumerate(alerted_tickers_main, 1):
+            # 봇이 중지되었으면 즉시 중단
+            if not bot_running:
+                logging.info("🛑 봇 중지 요청 감지. 알림 전송을 중단합니다.")
+                break
+            
             try:
                 ticker = result['ticker']
                 df = result['df']
@@ -816,11 +882,21 @@ async def check_price():
             except Exception as e:
                 logging.error(f"[메인] {ticker} 알림 전송 오류: {e}", exc_info=True)
     
+    # 봇이 중지되었는지 다시 확인
+    if not bot_running:
+        logging.info("🛑 봇 중지 요청 감지. BB 전용 알림 전송을 중단합니다.")
+        return
+    
     # 2. BB 전용 채널 알림 (BB만 만족)
     if alerted_tickers_bb_only and channel_bb_only:
         logging.info(f"📢 [BB 전용 채널] 알림 전송 시작: {len(alerted_tickers_bb_only)}개 티커")
         
         for idx, result in enumerate(alerted_tickers_bb_only, 1):
+            # 봇이 중지되었으면 즉시 중단
+            if not bot_running:
+                logging.info("🛑 봇 중지 요청 감지. BB 전용 알림 전송을 중단합니다.")
+                break
+            
             try:
                 ticker = result['ticker']
                 df = result['df']
@@ -840,12 +916,8 @@ async def check_price():
                     f"📊 차트를 확인하세요!"
                 )
                 
-                chart_buf = draw_chart(df, ticker)
-                if chart_buf:
-                    file = discord.File(chart_buf, filename=f'{ticker}_chart.png')
-                    await channel_bb_only.send(content=msg, file=file)
-                else:
-                    await channel_bb_only.send(content=msg)
+                # BB Only - 이미지 첨부 없이 텍스트만 전송
+                await channel_bb_only.send(content=msg)
                 
                 # 오늘 장일 날짜로 알람 날짜 기록 (BB 전용 알림도 중복 방지)
                 last_alert_dates[ticker] = trading_day_str
@@ -942,7 +1014,14 @@ def run_bot():
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(client.start(TOKEN))
+        try:
+            loop.run_until_complete(client.start(TOKEN))
+        except RuntimeError as e:
+            # "Event loop stopped before Future completed" 오류는 정상적인 종료 상황
+            if "Event loop stopped" in str(e):
+                logging.info("🛑 봇이 정상적으로 중지되었습니다.")
+            else:
+                raise
     except Exception as e:
         logging.error(f"봇 실행 오류: {e}", exc_info=True)
         # GUI가 있으면 에러 상태로 표시
@@ -1685,34 +1764,73 @@ class StockBotGUI:
         
     def stop_bot(self):
         """봇 중지"""
-        global bot_running, loop
+        global bot_running, loop, client
         
         if not bot_running:
             return
         
-        bot_running = False
+        self.add_log("")
+        self.add_log("[중지] 봇을 중지합니다...")
         
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
-        # 티커 추가는 항상 활성화되어 있으므로 상태 변경 불필요
-        # self.ticker_entry.config(state=tk.NORMAL)
-        # self.add_ticker_button.config(state=tk.NORMAL)
+        # 봇 실행 플래그를 먼저 False로 설정
+        bot_running = False
         
         # 상태 표시: 회색 (중지됨)
         self.update_status('stopped', '중지됨')
         
-        self.add_log("")
-        self.add_log("[중지] 봇을 중지합니다...")
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
         
-        # 봇 종료
-        try:
-            if loop and not loop.is_closed():
-                asyncio.run_coroutine_threadsafe(client.close(), loop)
-            check_price.cancel()
-        except Exception as e:
-            logging.error(f"봇 중지 오류: {e}")
+        # 봇 종료 (비동기로 처리하여 GUI 블로킹 방지)
+        def stop_bot_async():
+            """봇 종료를 백그라운드에서 처리"""
+            try:
+                # check_price 태스크 취소
+                if check_price.is_running():
+                    check_price.cancel()
+                
+                # Discord client 종료 및 루프 중지
+                if client and loop and not loop.is_closed():
+                    # 1. client.close() 호출 (비동기)
+                    close_future = asyncio.run_coroutine_threadsafe(client.close(), loop)
+                    
+                    # 2. client.close() 완료 후 루프 중지 (GUI 블로킹 방지)
+                    def stop_loop_after_close():
+                        """client.close() 완료 후 루프 중지"""
+                        try:
+                            # client.close() 완료 대기 (최대 3초)
+                            close_future.result(timeout=3)
+                        except Exception:
+                            pass  # 오류는 무시하고 계속
+                        finally:
+                            # client.close() 완료 여부와 관계없이 루프 중지
+                            try:
+                                if loop and not loop.is_closed():
+                                    loop.call_soon_threadsafe(loop.stop)
+                            except Exception:
+                                pass
+                    
+                    # 백그라운드에서 close 완료 대기 및 루프 중지
+                    threading.Thread(target=stop_loop_after_close, daemon=True).start()
+            except Exception as e:
+                logging.error(f"봇 중지 오류: {e}", exc_info=True)
+                # 오류 발생 시에도 루프 중지 시도
+                if loop and not loop.is_closed():
+                    try:
+                        loop.call_soon_threadsafe(loop.stop)
+                    except:
+                        pass
+            finally:
+                # 모든 종료 작업 완료 후 간결한 로그 출력
+                logging.info("🛑 봇 중지")
+                # 안내 메시지를 마지막에 출력 (GUI 스레드에서 실행)
+                def show_final_messages():
+                    self.add_log("[안내] 봇이 중지되었습니다.")
+                    self.add_log("[안내] 봇을 다시 시작하려면 '봇 시작' 버튼을 클릭하세요.")
+                self.root.after(0, show_final_messages)
         
-        self.add_log("[안내] 봇을 다시 시작하려면 프로그램을 재시작하세요.")
+        # 백그라운드 스레드에서 봇 종료 처리 (GUI 블로킹 방지)
+        threading.Thread(target=stop_bot_async, daemon=True).start()
 
 if __name__ == '__main__':
     try:
