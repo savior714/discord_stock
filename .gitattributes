@@ -2,12 +2,12 @@
 # Ensure all text files use UTF-8 encoding
 
 # Text files
-*.py text eol=lf encoding=UTF-8
-*.md text eol=lf encoding=UTF-8
-*.txt text eol=lf encoding=UTF-8
-*.json text eol=lf encoding=UTF-8
-*.env text eol=lf encoding=UTF-8
-*.bat text eol=crlf encoding=UTF-8
+*.py text eol=lf working-tree-encoding=UTF-8
+*.md text eol=lf working-tree-encoding=UTF-8
+*.txt text eol=lf working-tree-encoding=UTF-8
+*.json text eol=lf working-tree-encoding=UTF-8
+*.env text eol=lf working-tree-encoding=UTF-8
+*.bat text eol=crlf working-tree-encoding=UTF-8
 
 # Ensure line endings are normalized
 * text=auto

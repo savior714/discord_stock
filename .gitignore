@@ -48,3 +48,8 @@ Thumbs.db
 *.png
 !README.md
 
+# 실행 중 생성되는 데이터 파일
+*.json
+!package.json
+!package-lock.json
+
